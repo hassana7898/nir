@@ -1,0 +1,153 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { spawn } = require('child_process');
+
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const BACKUP_DIR = process.env.NIR_BACKUP_DIR || path.join(process.cwd(), 'backups');
+const BACKUP_TIME = process.env.NIR_BACKUP_TIME || '02:00';
+const RETENTION_DAYS = Math.max(1, Number(process.env.NIR_BACKUP_RETENTION_DAYS || 30));
+const PG_DUMP_PATH = process.env.PG_DUMP_PATH || 'pg_dump';
+
+let timer = null;
+let running = false;
+let lastBackup = null;
+let lastError = null;
+
+function ensureDir() {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+
+function backupFiles() {
+  ensureDir();
+  return fs.readdirSync(BACKUP_DIR)
+    .filter(name => /^nir_\d{8}_\d{6}\.dump$/i.test(name))
+    .map(name => {
+      const full = path.join(BACKUP_DIR, name);
+      const stat = fs.statSync(full);
+      return { name, path: full, mtimeMs: stat.mtimeMs, size: stat.size };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+function pruneOldBackups() {
+  const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  for (const file of backupFiles()) {
+    if (file.mtimeMs < cutoff) {
+      try { fs.unlinkSync(file.path); } catch (error) { console.error('[NIR Backup] prune failed:', error?.message || error); }
+    }
+  }
+}
+
+function runBackup(reason = 'scheduled') {
+  if (running) return Promise.resolve({ ok: false, skipped: true, reason: 'already-running' });
+  if (!DATABASE_URL) {
+    lastError = 'DATABASE_URL is not configured.';
+    return Promise.resolve({ ok: false, error: lastError });
+  }
+
+  ensureDir();
+  running = true;
+  lastError = null;
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 15);
+  const fileName = `nir_${stamp}.dump`;
+  const output = path.join(BACKUP_DIR, fileName);
+
+  return new Promise((resolve) => {
+    const child = spawn(PG_DUMP_PATH, [DATABASE_URL, '--format=custom', `--file=${output}`], {
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: process.env,
+    });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', error => {
+      running = false;
+      lastError = `pg_dump اجرا نشد: ${error.message}`;
+      try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch {}
+      console.error('[NIR Backup]', lastError);
+      resolve({ ok: false, error: lastError });
+    });
+    child.on('close', code => {
+      running = false;
+      if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
+        const stat = fs.statSync(output);
+        lastBackup = { name: fileName, createdAt: new Date().toISOString(), size: stat.size, reason };
+        pruneOldBackups();
+        console.log(`[NIR Backup] success: ${fileName}`);
+        resolve({ ok: true, backup: lastBackup });
+      } else {
+        try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch {}
+        lastError = stderr.trim() || `pg_dump با کد ${code} متوقف شد.`;
+        console.error('[NIR Backup]', lastError);
+        resolve({ ok: false, error: lastError });
+      }
+    });
+  });
+}
+
+function shouldRunNow(now = new Date()) {
+  const [hour, minute] = BACKUP_TIME.split(':').map(Number);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return false;
+  if (now.getHours() !== hour || now.getMinutes() !== minute) return false;
+  const today = now.toISOString().slice(0, 10);
+  return !backupFiles().some(file => new Date(file.mtimeMs).toISOString().slice(0, 10) === today);
+}
+
+function schedule() {
+  if (timer) clearInterval(timer);
+  // Check once per minute. This survives application restarts because an existing
+  // backup for the current day prevents a duplicate backup.
+  timer = setInterval(() => {
+    const now = new Date();
+    if (shouldRunNow(now)) void runBackup('scheduled');
+  }, 60 * 1000);
+  if (timer.unref) timer.unref();
+
+  // If NIR starts after the configured time and today's backup does not exist,
+  // create it shortly after startup instead of waiting until tomorrow.
+  setTimeout(() => {
+    const now = new Date();
+    const [hour, minute] = BACKUP_TIME.split(':').map(Number);
+    const minutesNow = now.getHours() * 60 + now.getMinutes();
+    const target = hour * 60 + minute;
+    if (minutesNow >= target && !backupFiles().some(file => new Date(file.mtimeMs).toISOString().slice(0, 10) === now.toISOString().slice(0, 10))) {
+      void runBackup('startup-catchup');
+    }
+  }, 5000);
+}
+
+function status() {
+  const files = backupFiles();
+  const newest = files[0] || null;
+  return {
+    enabled: Boolean(DATABASE_URL),
+    running,
+    schedule: BACKUP_TIME,
+    retentionDays: RETENTION_DAYS,
+    directory: BACKUP_DIR,
+    hostname: os.hostname(),
+    lastBackup: lastBackup || (newest ? { name: newest.name, createdAt: new Date(newest.mtimeMs).toISOString(), size: newest.size, reason: 'existing' } : null),
+    lastError,
+    backups: files.slice(0, 30).map(file => ({ name: file.name, createdAt: new Date(file.mtimeMs).toISOString(), size: file.size })),
+  };
+}
+
+function safeBackupPath(name) {
+  if (!/^nir_\d{8}_\d{6}\.dump$/i.test(name)) return null;
+  const resolved = path.resolve(BACKUP_DIR, name);
+  return resolved.startsWith(path.resolve(BACKUP_DIR) + path.sep) ? resolved : null;
+}
+
+function installAutomaticBackup(app) {
+  app.get('/api/backup/status', (_req, res) => res.json(status()));
+  app.post('/api/backup/run', async (_req, res) => res.json(await runBackup('manual')));
+  app.get('/api/backup/download/:name', (req, res) => {
+    const file = safeBackupPath(req.params.name);
+    if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'Backup not found' });
+    return res.download(file, path.basename(file));
+  });
+  schedule();
+}
+
+module.exports = { installAutomaticBackup, runBackup, status };
