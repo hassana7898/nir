@@ -6,6 +6,8 @@ const { Pool } = require('pg');
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const DEFAULT_COLLECTION = process.env.STORAGE_COLLECTION || 'poultryData';
 const MAX_BODY = process.env.JSON_BODY_LIMIT || '50mb';
+const CLOUD_SYNC_URL = (process.env.CLOUD_SYNC_URL || '').replace(/\/$/, '');
+const CLOUD_SYNC_TOKEN = process.env.CLOUD_SYNC_TOKEN || '';
 
 let pool = null;
 let initPromise = null;
@@ -48,6 +50,27 @@ function validCollection(name) {
   return name === DEFAULT_COLLECTION;
 }
 
+// Cloudflare is an emergency read replica. Mini PC/PostgreSQL remains the only
+// normal write master. A failed cloud mirror never blocks a local transaction.
+async function mirrorToCloud(id, data) {
+  if (!CLOUD_SYNC_URL) return;
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (CLOUD_SYNC_TOKEN) headers.Authorization = `Bearer ${CLOUD_SYNC_TOKEN}`;
+    const response = await fetch(`${CLOUD_SYNC_URL}/api/storage/${encodeURIComponent(DEFAULT_COLLECTION)}/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Cloud mirror failed (${response.status}) ${body}`);
+    }
+  } catch (error) {
+    console.error('[Cloudflare mirror] non-blocking sync failed:', error);
+  }
+}
+
 function installStorageApi(app) {
   if (app.__postgresStorageInstalled) return;
   app.__postgresStorageInstalled = true;
@@ -58,7 +81,7 @@ function installStorageApi(app) {
     try {
       const db = await initDb();
       await db.query('SELECT 1');
-      res.json({ status: 'ok', configured: true, database: 'postgresql', collection: DEFAULT_COLLECTION });
+      res.json({ status: 'ok', configured: true, database: 'postgresql', collection: DEFAULT_COLLECTION, cloudReplicaConfigured: Boolean(CLOUD_SYNC_URL) });
     } catch (error) {
       console.error('[PostgreSQL] health failed:', error);
       res.status(503).json({ status: 'error', configured: Boolean(DATABASE_URL), database: 'postgresql', error: error.message });
@@ -109,7 +132,9 @@ function installStorageApi(app) {
          RETURNING document_id AS id, data, updated_at`,
         [req.params.collectionName, req.params.id, JSON.stringify(req.body)],
       );
-      res.json({ ok: true, id: result.rows[0].id, data: result.rows[0].data, updatedAt: result.rows[0].updated_at });
+      const payload = { id: result.rows[0].id, data: result.rows[0].data, updatedAt: result.rows[0].updated_at };
+      res.json({ ok: true, ...payload });
+      void mirrorToCloud(req.params.id, result.rows[0].data);
     } catch (error) {
       console.error('[PostgreSQL] document write failed:', error);
       res.status(502).json({ error: error.message || 'Database write failed' });
