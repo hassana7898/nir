@@ -84,15 +84,16 @@ if errorlevel 0 (
 )
 
 echo.
-echo [4/5] نصب دقیق وابستگی‌ها...
-if not exist "package-lock.json" (
-  echo [خطا] package-lock.json در نسخه جدید وجود ندارد.
-  pause
-  exit /b 1
+echo [4/5] نصب وابستگی‌ها...
+if exist "package-lock.json" (
+  echo package-lock.json پیدا شد؛ اجرای npm ci...
+  call npm ci
+) else (
+  echo package-lock.json وجود ندارد؛ اجرای npm install...
+  call npm install
 )
-call npm ci
 if errorlevel 1 (
-  echo [خطا] npm ci ناموفق بود.
+  echo [خطا] نصب وابستگی‌ها ناموفق بود.
   pause
   exit /b 1
 )
