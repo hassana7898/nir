@@ -1,9 +1,9 @@
-
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
+import 'sahel-font/dist/font-face.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
