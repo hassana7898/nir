@@ -422,7 +422,13 @@ const BroodDetailsCard: React.FC<BroodDetailsCardProps> = ({ farmer, brood, allE
     // --- Phase Logic Calculation ---
     const getProductPhaseInfo = (currentProductId: string, productQuota: number, sentAmount: number) => {
         const getPhaseDuration = (prodId: string) => settings.productPhaseDurations?.[prodId] || 10;
-        const finishedGoods = settings.products.filter(p => p.type === 'finishedGood');
+        const finishedGoods = settings.products.filter(p => {
+            if (p.type !== 'finishedGood') return false;
+            if (brood.activeProductsAtCreation) {
+                return brood.activeProductsAtCreation.includes(p.id);
+            }
+            return !p.isDeleted;
+        });
         
         let startDay = 1;
         let endDay = 0;
