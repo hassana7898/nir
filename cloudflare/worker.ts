@@ -15,7 +15,7 @@ function json(data: unknown, status = 200) {
 
 function authorized(request: Request, env: Env) {
   const token = env.SYNC_TOKEN?.trim();
-  if (!token) return true;
+  if (!token) return false;
   return request.headers.get('authorization') === `Bearer ${token}`;
 }
 
