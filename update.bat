@@ -7,7 +7,7 @@ color 0A
 
 echo ========================================
 echo       NIR - بروزرسانی خودکار
- e cho ========================================
+echo ========================================
 echo.
 
 where git >nul 2>nul
@@ -31,7 +31,7 @@ if %NODE_MAJOR% LSS 22 (
   exit /b 1
 )
 
-if not exist ".git\" (
+if not exist ".git\HEAD" (
   echo [خطا] این پوشه Git repository نیست.
   pause
   exit /b 1
@@ -48,13 +48,6 @@ call "config.bat"
 if "%PORT%"=="" set "PORT=3000"
 
 echo [1/5] بررسی تغییرات محلی...
-git status --porcelain
-if errorlevel 1 (
-  echo [خطا] بررسی Git ناموفق بود.
-  pause
-  exit /b 1
-)
-
 for /f "delims=" %%A in ('git status --porcelain --untracked-files=all') do (
   echo.
   echo [خطا] تغییر یا فایل محلی پیدا شد: %%A
@@ -129,7 +122,7 @@ if not exist "logs" mkdir logs
 echo.
 echo ========================================
 echo       بروزرسانی با موفقیت انجام شد
- e cho ========================================
+echo ========================================
 echo.
 echo config.bat دست‌نخورده باقی مانده است.
 echo PostgreSQL دست‌نخورده باقی مانده است.
