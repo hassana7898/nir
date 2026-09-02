@@ -3,7 +3,9 @@ dist/
 .env
 .env.*
 !.env.example
+config.bat
 *.log
+logs/
 .DS_Store
 .vscode/
 .idea/
