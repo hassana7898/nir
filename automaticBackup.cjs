@@ -7,7 +7,36 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 const BACKUP_DIR = process.env.NIR_BACKUP_DIR || path.join(process.cwd(), 'backups');
 const BACKUP_TIME = process.env.NIR_BACKUP_TIME || '02:00';
 const RETENTION_DAYS = Math.max(1, Number(process.env.NIR_BACKUP_RETENTION_DAYS || 30));
-const PG_DUMP_PATH = process.env.PG_DUMP_PATH || 'pg_dump';
+
+function findPgDump() {
+  if (process.env.PG_DUMP_PATH) return process.env.PG_DUMP_PATH;
+  if (process.platform !== 'win32') return 'pg_dump';
+
+  const candidates = [
+    'C:\\Program Files\\PostgreSQL',
+    'C:\\Program Files (x86)\\PostgreSQL',
+    process.env.ProgramW6432 ? path.join(process.env.ProgramW6432, 'PostgreSQL') : null,
+    process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'PostgreSQL') : null,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'PostgreSQL') : null
+  ].filter(Boolean);
+
+  for (const root of candidates) {
+    try {
+      if (!fs.existsSync(root)) continue;
+      const versions = fs.readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name)
+        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+      for (const version of versions) {
+        const exe = path.join(root, version, 'bin', 'pg_dump.exe');
+        if (fs.existsSync(exe)) return exe;
+      }
+    } catch {}
+  }
+  return 'pg_dump';
+}
+
+const PG_DUMP_PATH = findPgDump();
 
 let timer = null;
 let running = false;
@@ -42,7 +71,7 @@ function runBackup(reason = 'scheduled') {
     const child = spawn(PG_DUMP_PATH, [DATABASE_URL, '--format=custom', `--file=${output}`], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: process.env });
     let stderr = '';
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    child.on('error', error => { running = false; lastError = `pg_dump اجرا نشد: ${error.message}`; try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch {} console.error('[NIR Backup]', lastError); resolve({ ok: false, error: lastError }); });
+    child.on('error', error => { running = false; lastError = `pg_dump اجرا نشد: ${error.message} | مسیر: ${PG_DUMP_PATH}`; try { if (fs.existsSync(output)) fs.unlinkSync(output); } catch {} console.error('[NIR Backup]', lastError); resolve({ ok: false, error: lastError }); });
     child.on('close', code => {
       running = false;
       if (code === 0 && fs.existsSync(output) && fs.statSync(output).size > 0) {
@@ -67,7 +96,7 @@ function schedule() {
 
 function status() {
   const files = backupFiles(); const newest = files[0] || null;
-  return { enabled: Boolean(DATABASE_URL), running, schedule: BACKUP_TIME, retentionDays: RETENTION_DAYS, directory: BACKUP_DIR, hostname: os.hostname(), lastBackup: lastBackup || (newest ? { name: newest.name, createdAt: new Date(newest.mtimeMs).toISOString(), size: newest.size, reason: 'existing' } : null), lastError, backups: files.slice(0, 30).map(file => ({ name: file.name, createdAt: new Date(file.mtimeMs).toISOString(), size: file.size })) };
+  return { enabled: Boolean(DATABASE_URL), running, schedule: BACKUP_TIME, retentionDays: RETENTION_DAYS, directory: BACKUP_DIR, hostname: os.hostname(), pgDumpPath: PG_DUMP_PATH, lastBackup: lastBackup || (newest ? { name: newest.name, createdAt: new Date(newest.mtimeMs).toISOString(), size: newest.size, reason: 'existing' } : null), lastError, backups: files.slice(0, 30).map(file => ({ name: file.name, createdAt: new Date(file.mtimeMs).toISOString(), size: file.size })) };
 }
 
 function safeBackupPath(name) { if (!/^nir_\d{8}_\d{6}\.dump$/i.test(name)) return null; const resolved = path.resolve(BACKUP_DIR, name); return resolved.startsWith(path.resolve(BACKUP_DIR) + path.sep) ? resolved : null; }
