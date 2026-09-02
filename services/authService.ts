@@ -1,5 +1,12 @@
 const PASSWORD_SET_KEY = 'poultryAppPasswordConfigured';
+const LEGACY_PASSWORD_HASH_KEY = 'poultryAppPasswordHash';
+const LEGACY_PASSWORD_SALT_KEY = 'poultryAppPasswordSalt';
 const SESSION_KEY = 'poultryAppSession';
+
+const clearLegacyBrowserCredentials = () => {
+    localStorage.removeItem(LEGACY_PASSWORD_HASH_KEY);
+    localStorage.removeItem(LEGACY_PASSWORD_SALT_KEY);
+};
 
 const api = async (url: string, options: RequestInit = {}): Promise<Response> => fetch(url, {
     ...options,
@@ -9,6 +16,7 @@ const api = async (url: string, options: RequestInit = {}): Promise<Response> =>
 
 /** Server is the authentication source of truth; no password or password hash is stored in the browser. */
 export const initializeAuth = async (): Promise<boolean> => {
+    clearLegacyBrowserCredentials();
     try {
         const response = await api('/api/auth/status');
         if (!response.ok) throw new Error(`Auth status failed: ${response.status}`);
@@ -34,12 +42,14 @@ export const setPassword = async (password: string): Promise<void> => {
         throw new Error(data.error || 'Could not set password');
     }
     localStorage.setItem(PASSWORD_SET_KEY, 'true');
+    clearLegacyBrowserCredentials();
 };
 
 export const clearPassword = async (): Promise<void> => {
     const response = await api('/api/auth/clear-password', { method: 'POST' });
     if (!response.ok) throw new Error('Could not clear password');
     localStorage.removeItem(PASSWORD_SET_KEY);
+    clearLegacyBrowserCredentials();
     sessionStorage.removeItem(SESSION_KEY);
 };
 
