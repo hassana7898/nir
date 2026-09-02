@@ -12,8 +12,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      // Chabokan service has only 0.4 GB RAM. Keep the production build
-      // deliberately light to avoid the Linux OOM killer terminating Vite.
+      // Client assets live in a dedicated directory so Cloudflare never serves
+      // the Node.js server bundle as a public static asset.
+      outDir: 'dist/client',
       target: 'esnext',
       minify: false,
       sourcemap: false,
@@ -21,6 +22,7 @@ export default defineConfig(({ mode }) => {
       assetsInlineLimit: 0,
       cssCodeSplit: true,
       chunkSizeWarningLimit: 1500,
+      emptyOutDir: true,
     },
     css: {
       preprocessorMaxWorkers: 0,
