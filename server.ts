@@ -11,21 +11,12 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "50mb";
 
 const allowedOrigin = process.env.CORS_ORIGIN;
-app.use(
-  cors(
-    allowedOrigin
-      ? { origin: allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean) }
-      : undefined,
-  ),
-);
+app.use(cors(allowedOrigin ? { origin: allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean) } : undefined));
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 let ai: GoogleGenAI | null = null;
 const apiKey = process.env.GEMINI_API_KEY?.trim();
-
-if (apiKey) {
-  try { ai = new GoogleGenAI({ apiKey }); } catch (err) { console.warn("Could not initialize GoogleGenAI:", err); }
-}
+if (apiKey) { try { ai = new GoogleGenAI({ apiKey }); } catch (err) { console.warn("Could not initialize GoogleGenAI:", err); } }
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", environment: NODE_ENV, geminiConfigured: Boolean(process.env.GEMINI_API_KEY), model: GEMINI_MODEL });
@@ -41,12 +32,14 @@ app.post("/api/extract", async (req, res) => {
       else return res.status(503).json({ error: "GEMINI_API_KEY is not configured on the server." });
     }
     const responseSchema = type === "entry" ? {
-      type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
-        sellerName: { type: Type.STRING, nullable: true }, productName: { type: Type.STRING, nullable: true }, billWeight: { type: Type.NUMBER, nullable: true }, scaleWeight: { type: Type.NUMBER, nullable: true }, driverName: { type: Type.STRING, nullable: true }, billNumber: { type: Type.STRING, nullable: true }, origin: { type: Type.STRING, nullable: true }, transportCost: { type: Type.NUMBER, nullable: true }, driverPhone: { type: Type.STRING, nullable: true }, driverIBAN: { type: Type.STRING, nullable: true },
+      type: Type.ARRAY,
+      items: { type: Type.OBJECT, properties: {
+        sellerName: { type: Type.STRING, nullable: true }, productName: { type: Type.STRING, nullable: true }, billWeight: { type: Type.NUMBER, nullable: true }, scaleWeight: { type: Type.NUMBER, nullable: true }, driverName: { type: Type.STRING, nullable: true }, billNumber: { type: Type.STRING, nullable: true }, origin: { type: Type.STRING, nullable: true }, transportCost: { type: Type.NUMBER, nullable: true }, driverPhone: { type: Type.STRING, nullable: true }, driverIBAN: { type: Type.STRING, nullable: true }
       }}
     } : {
-      type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
-        farmerName: { type: Type.STRING, nullable: true }, productName: { type: Type.STRING, nullable: true }, weight: { type: Type.NUMBER, nullable: true }, driverName: { type: Type.STRING, nullable: true }, invoiceNumber: { type: Type.STRING, nullable: true },
+      type: Type.ARRAY,
+      items: { type: Type.OBJECT, properties: {
+        farmerName: { type: Type.STRING, nullable: true }, productName: { type: Type.STRING, nullable: true }, weight: { type: Type.NUMBER, nullable: true }, driverName: { type: Type.STRING, nullable: true }, invoiceNumber: { type: Type.STRING, nullable: true }
       }}
     };
     const kf = knownFarmers?.length ? `\nKnown Farmers/Sellers: ${knownFarmers.join(", ")}` : "";
@@ -54,11 +47,33 @@ app.post("/api/extract", async (req, res) => {
     const kd = knownDrivers?.length ? `\nKnown Drivers: ${knownDrivers.join(", ")}` : "";
     const contextStr = `${kf}${kp}${kd}`;
     const promptText = type === "entry"
-      ? `Task: Extract Persian raw materials entry remittance data from this image/pdf (Right-to-Left). Return a JSON Array of objects. Columns: Seller -> sellerName, Product -> productName, Bill Weight -> billWeight, Scale Weight -> scaleWeight, Driver -> driverName, Bill Number -> billNumber, Origin -> origin, Transport Cost -> transportCost, Driver Phone -> driverPhone, Driver IBAN -> driverIBAN. Separate seller and product. Known values:${contextStr}`
-      : `Task: Extract Persian exit remittance data from this image/pdf (Right-to-Left). Return a JSON Array of objects. Columns: Farmer -> farmerName, Product -> productName, Weight -> weight, Driver -> driverName, Invoice No -> invoiceNumber. Separate farmer and product. Known values:${contextStr}`;
+      ? `Task: Extract Persian raw materials entry remittance data from this image/pdf (Right-to-Left). Return a JSON Array of objects. Columns mapped to JSON keys: Seller Name (فروشنده) -> sellerName; Product (نوع محصول) -> productName; Bill Weight (وزن بارنامه) -> billWeight; Scale Weight (وزن باسکول) -> scaleWeight; Driver (راننده) -> driverName; Bill Number (شماره بارنامه/حواله) -> billNumber; Origin (مبدا) -> origin; Transport Cost (کرایه) -> transportCost; Driver Phone -> driverPhone; Driver IBAN -> driverIBAN. CRITICAL: Always separate seller name from product name. Commodity words such as ذرت، سویا، دان، گندم، جو، کنجاله، روغن، مکمل، سبوس، پلت، کربنات، نمک، متیونین، لیزین belong in productName, not sellerName. Context:${contextStr}`
+      : `Task: Extract Persian exit remittance data from this image/pdf (Right-to-Left). Return a JSON Array of objects. Columns mapped to JSON keys: Farmer Name (مرغدار/خریدار) -> farmerName; Product -> productName; Weight -> weight; Driver -> driverName; Invoice No -> invoiceNumber. CRITICAL: Always separate farmer name from product name. Agricultural commodity words belong in productName, not farmerName. Context:${contextStr}`;
     const response = await ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ inlineData: { mimeType, data: base64Data } }, { text: promptText }] }, config: { responseMimeType: "application/json", responseSchema } });
     if (!response.text) return res.status(502).json({ error: "Empty response from Gemini." });
-    return res.json(JSON.parse(response.text.trim()));
+    let rawData = JSON.parse(response.text.trim());
+    if (Array.isArray(rawData)) {
+      const productKeywords = ["ذرت", "سویا", "پیش دان", "میان دان", "پس دان", "دان", "گندم", "جو", "مرغ", "کنجاله", "پودر", "روغن", "مکمل", "سبوس", "رول", "پلت", "کراش", "پریمال", "متیونین", "لیزین", "کربنات", "صدف", "نمک", "جوجه", "گوشتی", "زنده", "استارتر", "ویتامین", "کلسیم", "فسفر", "دی کلسیم", "کنسانتره", "رشد", "آغازین", "پایانی"];
+      const kpArray = (knownProducts || []).map((p: string) => p.trim());
+      const allProducts = [...new Set([...productKeywords, ...kpArray])].sort((a, b) => b.length - a.length);
+      rawData = rawData.map((item: any) => {
+        let nameObj = type === "entry" ? item.sellerName : item.farmerName;
+        const prodObj = item.productName;
+        if (nameObj && typeof nameObj === "string" && (!prodObj || prodObj.toString().trim() === "")) {
+          let name = nameObj.trim(); let productNameRaw = "";
+          for (const p of allProducts) {
+            if (p && name.includes(p)) {
+              const regex = new RegExp(`(?:^|\\s)(${p})(?:\\s|$)`); const match = name.match(regex);
+              if (match) { productNameRaw = match[1]; name = name.replace(regex, " ").trim(); break; }
+              if (name.endsWith(p)) { productNameRaw = p; name = name.slice(0, name.length - p.length).trim(); break; }
+            }
+          }
+          if (productNameRaw) { if (type === "entry") item.sellerName = name; else item.farmerName = name; item.productName = productNameRaw; }
+        }
+        return item;
+      });
+    }
+    return res.json(rawData);
   } catch (error: any) {
     console.error("Gemini Extraction Error:", error);
     return res.status(error?.status === 429 ? 429 : 500).json({ error: error?.message || "Unknown error during AI extraction." });
