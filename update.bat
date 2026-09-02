@@ -84,14 +84,9 @@ if errorlevel 0 (
 )
 
 echo.
-echo [4/5] نصب وابستگی‌ها...
-if exist "package-lock.json" (
-  echo package-lock.json پیدا شد؛ اجرای npm ci...
-  call npm ci
-) else (
-  echo package-lock.json وجود ندارد؛ اجرای npm install...
-  call npm install
-)
+echo [4/5] نصب و همگام‌سازی وابستگی‌ها...
+echo برای جلوگیری از مشکل package-lock قدیمی، npm install اجرا می‌شود.
+call npm install
 if errorlevel 1 (
   echo [خطا] نصب وابستگی‌ها ناموفق بود.
   pause
@@ -127,6 +122,8 @@ echo ========================================
 echo.
 echo config.bat دست‌نخورده باقی مانده است.
 echo PostgreSQL دست‌نخورده باقی مانده است.
+echo فونت ساحل به‌صورت محلی داخل Build قرار می‌گیرد.
+echo فونت جداول روی B Titr تنظیم شده است.
 echo.
 echo برای اعمال نسخه جدید سرور، start.bat را دوباره اجرا کنید.
 echo اگر NIR در یک پنجره دیگر در حال اجراست، ابتدا همان پنجره را با Ctrl+C متوقف کنید.
