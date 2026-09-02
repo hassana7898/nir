@@ -1,6 +1,3 @@
-import { sha256 } from '@noble/hashes/sha2.js';
-import { randomBytes } from '@noble/hashes/utils.js';
-
 const PASSWORD_SET_KEY = 'poultryAppPasswordConfigured';
 const SESSION_KEY = 'poultryAppSession';
 
@@ -10,7 +7,7 @@ const api = async (url: string, options: RequestInit = {}): Promise<Response> =>
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
 });
 
-/** Server is the authentication source of truth; no password hash is kept in the browser. */
+/** Server is the authentication source of truth; no password or password hash is stored in the browser. */
 export const initializeAuth = async (): Promise<boolean> => {
     try {
         const response = await api('/api/auth/status');
@@ -66,7 +63,3 @@ export const logout = (): void => {
 };
 
 export const isAuthenticated = (): boolean => sessionStorage.getItem(SESSION_KEY) === 'true';
-
-// Keep these imports available for legacy builds that still reference the previous helper format.
-void sha256;
-void randomBytes;
