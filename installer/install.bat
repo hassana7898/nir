@@ -1,23 +1,24 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0.."
-
-title NIR - نصب سرور محلی
+title NIR - نصب یک‌کلیکی سرور محلی
 
 echo ========================================
 echo       NIR - نصب سرور محلی کارخانه
-echo ========================================
+ echo ========================================
+echo.
+echo این برنامه را فقط روی Mini PC کارخانه اجرا کنید.
+echo IP و پورت دوربین‌ها را تغییر نمی‌دهد.
 echo.
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo [خطا] Node.js پیدا نشد.
-  echo لطفاً Node.js نسخه LTS را نصب کنید و دوباره این فایل را اجرا کنید.
+  echo [مرحله 1] Node.js پیدا نشد.
+  echo لطفاً Node.js نسخه LTS را نصب کنید و دوباره همین فایل را اجرا کنید.
   echo دانلود رسمی: https://nodejs.org/en/download
   pause
   exit /b 1
 )
-
 for /f "tokens=*" %%v in ('node -v') do set NODE_VERSION=%%v
 echo Node.js: %NODE_VERSION%
 
@@ -30,35 +31,31 @@ if errorlevel 1 (
 
 if not exist "config.bat" (
   echo.
-  echo فایل تنظیمات ساخته می‌شود.
-  echo.
-  copy /y "installer\config.example.bat" "config.bat" >nul
-  echo [مهم] فایل config.bat ساخته شد.
-  echo لطفاً رمز PostgreSQL را داخل آن وارد کنید و دوباره install.bat را اجرا کنید.
-  echo.
-  pause
-  exit /b 2
+  echo [مرحله 2] راه‌اندازی PostgreSQL...
+  call "installer\setup-postgresql.bat"
+  if errorlevel 1 exit /b 1
+) else (
+  echo [مرحله 2] config.bat موجود است؛ از تنظیمات فعلی استفاده می‌شود.
 )
 
 call "config.bat"
-
 if "%DATABASE_URL%"=="" (
-  echo [خطا] DATABASE_URL در config.bat تنظیم نشده است.
+  echo [خطا] DATABASE_URL تنظیم نشده است.
   pause
   exit /b 1
 )
 
 echo.
-echo [1/4] نصب کتابخانه‌های پروژه...
+echo [مرحله 3] نصب کتابخانه‌های NIR...
 call npm install
 if errorlevel 1 (
-  echo [خطا] npm install ناموفق بود.
+  echo [خطا] نصب کتابخانه‌ها ناموفق بود.
   pause
   exit /b 1
 )
 
 echo.
-echo [2/4] ساخت نسخه Production...
+echo [مرحله 4] ساخت نسخه Production...
 call npm run build
 if errorlevel 1 (
   echo [خطا] ساخت برنامه ناموفق بود.
@@ -67,31 +64,34 @@ if errorlevel 1 (
 )
 
 echo.
-echo [3/4] بررسی اتصال PostgreSQL...
+echo [مرحله 5] بررسی اتصال PostgreSQL...
 node "installer\check-db.cjs"
 if errorlevel 1 (
-  echo.
-  echo [خطا] اتصال به PostgreSQL برقرار نشد.
-  echo رمز، نام کاربری، نام دیتابیس و روشن بودن سرویس PostgreSQL را بررسی کنید.
+  echo [خطا] اتصال NIR به PostgreSQL برقرار نشد.
   pause
   exit /b 1
 )
 
 echo.
-echo [4/4] ساخت Shortcut و تنظیم اجرای خودکار...
+echo [مرحله 6] تنظیم اجرای خودکار Windows...
 call "installer\setup-autostart.bat"
+if errorlevel 1 (
+  echo [هشدار] اجرای خودکار تنظیم نشد، اما خود NIR نصب شده است.
+)
 
 if not exist "logs" mkdir logs
 
 echo.
 echo ========================================
-echo نصب NIR با موفقیت انجام شد.
-echo ========================================
+echo       نصب NIR با موفقیت تمام شد
+ echo ========================================
+echo.
+echo آدرس روی Mini PC: http://localhost:3000
+echo آدرس داخل شبکه:   http://IP-MINI-PC:3000
 echo.
 echo برای اجرای دستی: start.bat
- echo آدرس روی همین کامپیوتر: http://localhost:3000
- echo آدرس داخل شبکه: http://IP-MINI-PC:3000
- echo.
-echo اکنون start.bat اجرا می‌شود...
+echo برای پشتیبان‌گیری: backup.bat
+echo.
+echo اکنون NIR اجرا می‌شود...
 timeout /t 2 /nobreak >nul
-call start.bat
+start.bat
