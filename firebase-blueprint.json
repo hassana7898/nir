@@ -1,0 +1,19 @@
+{
+  "entities": {
+    "PoultryData": {
+      "title": "PoultryData",
+      "description": "Key-value store for app state",
+      "type": "object",
+      "properties": {
+        "value": { "type": "string" }
+      },
+      "required": ["value"]
+    }
+  },
+  "firestore": {
+    "/poultryData/{itemId}": {
+      "schema": "PoultryData",
+      "description": "Stores localstorage synced values."
+    }
+  }
+}
