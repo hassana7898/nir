@@ -9,10 +9,13 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap=false --outfile=dist/server.cjs",
     "start": "NODE_ENV=production node -r ./storageBootstrap.cjs dist/server.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cloudflare:build": "vite build",
+    "cloudflare:deploy": "npm run cloudflare:build && npx wrangler deploy"
   },
   "dependencies": {
     "@google/genai": "^1.42.0",
+    "@fontsource/vazirmatn": "^5.2.6",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "pdfjs-dist": "3.11.174",
