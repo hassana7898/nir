@@ -1,5 +1,7 @@
-
-@import url('https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/font-face.css');
+@import '@fontsource/vazirmatn/400.css';
+@import '@fontsource/vazirmatn/500.css';
+@import '@fontsource/vazirmatn/600.css';
+@import '@fontsource/vazirmatn/700.css';
 
 @tailwind base;
 @tailwind components;
@@ -7,7 +9,7 @@
 
 @layer base {
     body {
-        font-family: 'Sahel', Tahoma, sans-serif;
+        font-family: 'Vazirmatn', Tahoma, sans-serif;
         background-color: #f1f5f9;
     }
 }
@@ -39,7 +41,7 @@
     border-radius: 0.5rem;
     padding: 0.5rem;
     text-align: center;
-    font-family: 'Sahel', Tahoma, sans-serif;
+    font-family: 'Vazirmatn', Tahoma, sans-serif;
     background-color: #f8fafc;
 }
 .rmdp-input:focus {
@@ -108,7 +110,7 @@
         background-position: center;
         background-size: contain;
         opacity: 0.08;
-        z-index: 10; /* Changed from -1 to ensure visibility over white backgrounds */
+        z-index: 10;
         pointer-events: none;
         transform: rotate(-30deg);
         -webkit-print-color-adjust: exact !important;
@@ -126,9 +128,9 @@
         width: 100%; 
         font-size: 8.5pt;
         border-collapse: collapse;
-        font-family: 'B Titr', Tahoma, sans-serif !important;
+        font-family: 'Vazirmatn', Tahoma, sans-serif !important;
         position: relative;
-        z-index: 20; /* Ensure text is above watermark */
+        z-index: 20;
     }
     
     thead {
@@ -145,11 +147,11 @@
         white-space: nowrap;
         text-align: center;
         vertical-align: middle;
-        background-color: transparent !important; /* Allow watermark to show through rows */
+        background-color: transparent !important;
     }
 
     .print-header {
-        font-family: 'Sahel', Tahoma, sans-serif !important;
+        font-family: 'Vazirmatn', Tahoma, sans-serif !important;
         font-weight: normal !important;
     }
     .print-header h2, .print-header h3 {
@@ -158,7 +160,7 @@
     }
 
     .print-summary {
-        font-family: 'Sahel', Tahoma, sans-serif !important;
+        font-family: 'Vazirmatn', Tahoma, sans-serif !important;
         text-align: right;
         padding: 10px 0;
         page-break-before: auto;
@@ -173,7 +175,7 @@
         right: 1.5cm;
         justify-content: space-around;
         align-items: flex-end;
-        font-family: 'Sahel', Tahoma, sans-serif !important;
+        font-family: 'Vazirmatn', Tahoma, sans-serif !important;
         font-size: 9pt;
     }
     
