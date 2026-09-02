@@ -1,5 +1,4 @@
-
-import React, { createContext, useState, useContext, ReactNode, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import * as authService from '../services/authService';
 
 interface AuthContextType {
@@ -19,15 +18,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isPasswordSet, setIsPasswordSet] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    const checkStatus = useCallback(() => {
-        setIsPasswordSet(authService.isPasswordSet());
-        setIsAuthenticated(authService.isAuthenticated());
-        setLoading(false);
-    }, []);
-
     useEffect(() => {
-        checkStatus();
-    }, [checkStatus]);
+        let mounted = true;
+
+        const initialize = async () => {
+            try {
+                await authService.initializeAuth();
+            } catch (error) {
+                console.error('Auth initialization error:', error);
+            } finally {
+                if (mounted) {
+                    setIsPasswordSet(authService.isPasswordSet());
+                    setIsAuthenticated(authService.isAuthenticated());
+                    setLoading(false);
+                }
+            }
+        };
+
+        void initialize();
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     const login = async (password: string): Promise<boolean> => {
         const isValid = await authService.verifyPassword(password);
@@ -46,12 +58,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const setupPassword = async (password: string): Promise<void> => {
         await authService.setPassword(password);
-        checkStatus();
+        setIsPasswordSet(authService.isPasswordSet());
     };
 
     const clearPassword = async (): Promise<void> => {
         await authService.clearPassword();
-        checkStatus();
+        setIsPasswordSet(authService.isPasswordSet());
+        setIsAuthenticated(false);
     };
 
     return (
