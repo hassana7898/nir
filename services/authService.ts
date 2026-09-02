@@ -1,41 +1,22 @@
-
 import { db } from './firebase';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
-
-const setItemAndSync = (key: string, value: string) => {
-    localStorage.setItem(key, value);
-    setDoc(doc(db, 'poultryData', key), { value }).catch(e => console.error("Firebase sync error", e));
-};
-
-// Initial Sync from Firestore for Auth (blocking might not be possible, but we can do it via listener)
-onSnapshot(doc(db, 'poultryData', 'poultryAppPasswordHash'), (docSnap) => {
-    if (docSnap.exists() && docSnap.data().value) {
-        localStorage.setItem('poultryAppPasswordHash', docSnap.data().value);
-    }
-});
-
-onSnapshot(doc(db, 'poultryData', 'poultryAppPasswordSalt'), (docSnap) => {
-    if (docSnap.exists() && docSnap.data().value) {
-        localStorage.setItem('poultryAppPasswordSalt', docSnap.data().value);
-    }
-});
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 const PASSWORD_HASH_KEY = 'poultryAppPasswordHash';
 const PASSWORD_SALT_KEY = 'poultryAppPasswordSalt';
 const SESSION_KEY = 'poultryAppSession';
 
+const saveLocal = (key: string, value: string) => {
+    localStorage.setItem(key, value);
+};
+
+const saveServer = async (key: string, value: string): Promise<void> => {
+    await setDoc(doc(db, 'poultryData', key), { value });
+};
+
 const bufferToHex = (buffer: ArrayBuffer): string => {
     return [...new Uint8Array(buffer)]
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
-};
-
-const hexToBuffer = (hex: string): ArrayBuffer => {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-    }
-    return bytes.buffer;
 };
 
 const hashPassword = async (password: string, salt: string): Promise<string> => {
@@ -44,30 +25,96 @@ const hashPassword = async (password: string, salt: string): Promise<string> => 
     return bufferToHex(hashBuffer);
 };
 
+/**
+ * Loads authentication data from the central PostgreSQL-backed storage.
+ * localStorage is only a cache; PostgreSQL is the source of truth.
+ */
+export const initializeAuth = async (): Promise<boolean> => {
+    const localHash = localStorage.getItem(PASSWORD_HASH_KEY);
+    const localSalt = localStorage.getItem(PASSWORD_SALT_KEY);
+
+    try {
+        const [hashDoc, saltDoc] = await Promise.all([
+            getDoc(doc(db, 'poultryData', PASSWORD_HASH_KEY)),
+            getDoc(doc(db, 'poultryData', PASSWORD_SALT_KEY)),
+        ]);
+
+        const serverHash = hashDoc.exists() ? hashDoc.data()?.value : '';
+        const serverSalt = saltDoc.exists() ? saltDoc.data()?.value : '';
+
+        if (serverHash && serverSalt) {
+            saveLocal(PASSWORD_HASH_KEY, serverHash);
+            saveLocal(PASSWORD_SALT_KEY, serverSalt);
+            return true;
+        }
+
+        // Backward compatibility: if the central store is empty but this browser
+        // already has credentials, migrate them to the central store once.
+        if (localHash && localSalt) {
+            await Promise.all([
+                saveServer(PASSWORD_HASH_KEY, localHash),
+                saveServer(PASSWORD_SALT_KEY, localSalt),
+            ]);
+            return true;
+        }
+
+        localStorage.removeItem(PASSWORD_HASH_KEY);
+        localStorage.removeItem(PASSWORD_SALT_KEY);
+        return false;
+    } catch (error) {
+        // If the server is temporarily unavailable, keep a valid local cache.
+        // This allows an already-configured device to continue operating offline.
+        console.error('Authentication initialization failed:', error);
+        return Boolean(localHash && localSalt);
+    }
+};
+
 export const isPasswordSet = (): boolean => {
-    return localStorage.getItem(PASSWORD_HASH_KEY) !== null;
+    return Boolean(
+        localStorage.getItem(PASSWORD_HASH_KEY) &&
+        localStorage.getItem(PASSWORD_SALT_KEY)
+    );
 };
 
 export const setPassword = async (password: string): Promise<void> => {
     const salt = bufferToHex(crypto.getRandomValues(new Uint8Array(16)));
     const hash = await hashPassword(password, salt);
-    setItemAndSync(PASSWORD_SALT_KEY, salt);
-    setItemAndSync(PASSWORD_HASH_KEY, hash);
+
+    // The server must succeed before the new password is considered configured.
+    await Promise.all([
+        saveServer(PASSWORD_SALT_KEY, salt),
+        saveServer(PASSWORD_HASH_KEY, hash),
+    ]);
+
+    saveLocal(PASSWORD_SALT_KEY, salt);
+    saveLocal(PASSWORD_HASH_KEY, hash);
 };
 
 export const clearPassword = async (): Promise<void> => {
-    setItemAndSync(PASSWORD_SALT_KEY, '');
-    setItemAndSync(PASSWORD_HASH_KEY, '');
+    // Keep the existing semantics: empty values are written to the server,
+    // then removed locally so the next initialization treats auth as unset.
+    await Promise.all([
+        saveServer(PASSWORD_SALT_KEY, ''),
+        saveServer(PASSWORD_HASH_KEY, ''),
+    ]);
     localStorage.removeItem(PASSWORD_SALT_KEY);
     localStorage.removeItem(PASSWORD_HASH_KEY);
 };
 
 export const verifyPassword = async (password: string): Promise<boolean> => {
-    const salt = localStorage.getItem(PASSWORD_SALT_KEY);
-    const storedHash = localStorage.getItem(PASSWORD_HASH_KEY);
+    let salt = localStorage.getItem(PASSWORD_SALT_KEY);
+    let storedHash = localStorage.getItem(PASSWORD_HASH_KEY);
+
+    // Always refresh from the central store when local credentials are missing.
     if (!salt || !storedHash) {
-        return false;
+        const initialized = await initializeAuth();
+        if (!initialized) return false;
+        salt = localStorage.getItem(PASSWORD_SALT_KEY);
+        storedHash = localStorage.getItem(PASSWORD_HASH_KEY);
     }
+
+    if (!salt || !storedHash) return false;
+
     const hash = await hashPassword(password, salt);
     return hash === storedHash;
 };
