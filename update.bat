@@ -6,7 +6,7 @@ color 0A
 
 echo ========================================
 echo       NIR - بروزرسانی خودکار
- echo ========================================
+echo ========================================
 echo.
 
 where git >nul 2>nul
@@ -45,19 +45,23 @@ if errorlevel 0 (
 )
 
 echo [4/6] نصب وابستگی‌ها و ابزارهای Build...
-call npm install --include=dev
+set "NPM_CONFIG_PRODUCTION=false"
+set "NODE_ENV="
+call npm install --include=dev --no-audit --no-fund
 if errorlevel 1 ( echo [خطا] نصب وابستگی‌ها ناموفق بود. & pause & exit /b 1 )
 
 if not exist "node_modules\.bin\vite.cmd" (
-  echo [خطا] Vite نصب نشده است.
-  pause
-  exit /b 1
+  echo Vite بعد از نصب پیدا نشد؛ نصب مستقیم ابزارهای Build...
+  call npm install --save-dev vite@^7.3.6 esbuild@^0.27.0 --include=dev --no-audit --no-fund
+  if errorlevel 1 ( echo [خطا] نصب Vite و esbuild ناموفق بود. & pause & exit /b 1 )
 )
 if not exist "node_modules\.bin\esbuild.cmd" (
-  echo [خطا] esbuild نصب نشده است.
-  pause
-  exit /b 1
+  echo esbuild بعد از نصب پیدا نشد؛ نصب مستقیم ابزار Build...
+  call npm install --save-dev esbuild@^0.27.0 --include=dev --no-audit --no-fund
+  if errorlevel 1 ( echo [خطا] نصب esbuild ناموفق بود. & pause & exit /b 1 )
 )
+if not exist "node_modules\.bin\vite.cmd" ( echo [خطا] Vite هنوز نصب نشده است. & pause & exit /b 1 )
+if not exist "node_modules\.bin\esbuild.cmd" ( echo [خطا] esbuild هنوز نصب نشده است. & pause & exit /b 1 )
 
 echo [5/6] ساخت نسخه Production...
 call npm run build
@@ -74,7 +78,7 @@ schtasks /run /tn "NIR Server" >nul 2>nul
 
 if errorlevel 1 (
   echo [هشدار] اجرای خودکار Task Scheduler انجام نشد.
-  echo Build کامل شده است؛ می‌توانید NIR Server را از Task Scheduler اجرا کنید.
+  echo Build کامل شده است؛ NIR Server را از Task Scheduler اجرا کنید.
 ) else (
   echo سرور NIR با نسخه جدید راه‌اندازی شد.
 )
