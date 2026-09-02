@@ -3,13 +3,11 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": { "node": ">=22" },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "NODE_ENV=production node -r ./firestoreProxyBootstrap.cjs dist/server.cjs",
+    "start": "NODE_ENV=production node -r ./storageBootstrap.cjs dist/server.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
@@ -17,9 +15,8 @@
     "@google/genai": "^1.42.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "firebase": "^12.18.0",
-    "firebase-admin": "^14.3.0",
     "pdfjs-dist": "3.11.174",
+    "pg": "^8.16.3",
     "react": "^18.2.0",
     "react-date-object": "^2.1.9",
     "react-dom": "^18.2.0",
@@ -32,6 +29,7 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/pg": "^8.15.5",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@vitejs/plugin-react": "^4.2.1",
