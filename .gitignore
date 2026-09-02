@@ -6,6 +6,7 @@ dist/
 config.bat
 *.log
 logs/
+backups/
 .DS_Store
 .vscode/
 .idea/
