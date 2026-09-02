@@ -4,6 +4,7 @@ import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { installAutomaticBackup } from "./automaticBackup.cjs";
+import { installAuth, requireAuth } from "./serverAuth.cjs";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -11,17 +12,27 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "50mb";
 
+// NIR is normally same-origin. Cross-origin API access is opt-in and credentialed only.
 const allowedOrigin = process.env.CORS_ORIGIN;
-app.use(cors(allowedOrigin ? { origin: allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean) } : undefined));
+if (allowedOrigin) {
+  app.use(cors({
+    origin: allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean),
+    credentials: true,
+  }));
+}
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
+installAuth(app);
+app.use("/api/backup", requireAuth);
 installAutomaticBackup(app);
+app.use("/api/extract", requireAuth);
 
 let ai: GoogleGenAI | null = null;
 const apiKey = process.env.GEMINI_API_KEY?.trim();
 if (apiKey) { try { ai = new GoogleGenAI({ apiKey }); } catch (err) { console.warn("Could not initialize GoogleGenAI:", err); } }
 
 app.get("/api/health", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   res.json({ status: "ok", environment: NODE_ENV, geminiConfigured: Boolean(process.env.GEMINI_API_KEY), model: GEMINI_MODEL });
 });
 
