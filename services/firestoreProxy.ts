@@ -6,19 +6,32 @@ type SnapshotDoc = { id: string; data: () => any; exists: () => boolean };
 const API_BASE = '/api/storage';
 const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace(/\/$/, '') || '';
 const POLL_MS = 30000;
+const REQUEST_TIMEOUT_MS = 10000;
 
 const request = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
-    credentials: 'same-origin',
-  });
-  if (!response.ok) {
-    let message = `Storage request failed (${response.status})`;
-    try { const body = await response.json(); if (body?.error) message = body.error; } catch {}
-    throw new Error(message);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      let message = `Storage request failed (${response.status})`;
+      try { const body = await response.json(); if (body?.error) message = body.error; } catch {}
+      throw new Error(message);
+    }
+    return response.json();
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Storage server request timed out.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return response.json();
 };
 
 const cloudRequest = async (path: string, options?: RequestInit) => {
