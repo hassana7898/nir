@@ -1,87 +1,129 @@
-# راه‌اندازی حالت اضطراری Cloudflare برای NIR
+# راه‌اندازی Cloudflare Tunnel برای دسترسی اینترنتی NIR
 
-این معماری به‌صورت **Local-First** طراحی شده است:
+NIR در این معماری **Local-First** باقی می‌ماند:
 
 - Mini PC + PostgreSQL = منبع اصلی و Master
-- Cloudflare Worker + D1 = Replica اضطراری برای خواندن آخرین داده‌ها
-- Cloudflare Static Assets = کپی مستقل رابط کاربری، CSS، JS، تصاویر و فونت‌های Build شده
-- GitHub = فقط محل سورس‌کد و توسعه؛ اجرای روزمره به GitHub وابسته نیست
-- Chabokan/Firebase = در معماری جدید استفاده نمی‌شوند
+- NIR روی Mini PC = سرویس اصلی، فعلی روی `192.168.0.49:3000`
+- Cloudflare Tunnel = مسیر امن اینترنت به NIR، بدون Port Forwarding
+- Cloudflare Worker + D1 = فقط Replica اضطراری خواندنی برای Snapshotهای سینک‌شده
+- PostgreSQL = هرگز نباید روی اینترنت منتشر شود
+- احراز هویت روزمره = همان رمز عبور ساده خود NIR؛ Cloudflare Access/MFA برای این مرحله لازم نیست
 
-## 1. ساخت D1
+## 1. امنیتی که داخل NIR فعال است
 
-```bash
-npx wrangler login
-npx wrangler d1 create nir-storage
-```
+APIهای داده، استخراج Gemini و پشتیبان‌گیری دیگر بدون ورود قابل استفاده نیستند. ورود NIR یک Session Cookie از نوع `HttpOnly` ایجاد می‌کند و Session به هش رمز فعلی سرور وابسته است؛ با تغییر/حذف رمز، Session قبلی نیز اعتبارش را از دست می‌دهد.
 
-شناسه D1 که Wrangler برمی‌گرداند را داخل `wrangler.jsonc` در `database_id` قرار دهید.
+مرورگر دیگر نباید برای احراز هویت به password hash متکی باشد. رمز عبور فقط برای ورود به endpoint احراز هویت ارسال می‌شود و نتیجه، یک Session Cookie است.
 
-## 2. ایجاد جدول
+## 2. ساخت Tunnel
 
-```bash
-npx wrangler d1 execute nir-storage --remote --file=cloudflare/schema.sql
-```
+برای Production از **Remotely-managed Tunnel** استفاده کنید. Cloudflare برای اکثر کاربردها همین مدل را توصیه می‌کند.
 
-## 3. ساخت Secret برای Sync
+در داشبورد Cloudflare:
 
-```bash
-npx wrangler secret put SYNC_TOKEN
-```
+1. وارد **Networking → Tunnels** شوید.
+2. **Create Tunnel** را بزنید.
+3. یک نام مثل `nir-factory` انتخاب کنید.
+4. سیستم‌عامل Windows و معماری مناسب Mini PC را انتخاب کنید.
+5. دستور نصب `cloudflared` که Cloudflare نمایش می‌دهد را کپی کنید.
 
-یک مقدار تصادفی و طولانی وارد کنید. همین مقدار باید فقط روی Mini PC در متغیر `CLOUD_SYNC_TOKEN` قرار بگیرد.
+Cloudflare Tunnel اتصال خروجی ایجاد می‌کند؛ بنابراین برای دسترسی اینترنتی NIR نیازی به باز کردن پورت ورودی روی مودم یا فایروال ندارید.
 
-## 4. تنظیم آدرس Cloud روی Mini PC
+## 3. انتشار NIR
 
-در محیط اجرای Node.js روی Mini PC:
+در همان Tunnel یک **Published application** بسازید:
+
+- Hostname: مثلاً `nir.example.com`
+- Service URL: `http://192.168.0.49:3000`
+
+اگر `cloudflared` روی همان Mini PC اجرا می‌شود، می‌توانید به‌جای IP از `http://localhost:3000` استفاده کنید.
+
+در انتهای ingress باید catch-all با HTTP 404 وجود داشته باشد؛ اگر از تنظیمات Dashboard استفاده می‌کنید، Cloudflare آن را مدیریت می‌کند.
+
+## 4. نصب cloudflared روی Mini PC
+
+CMD را با **Run as administrator** باز کنید و دستور نصب مخصوص Tunnel را که Cloudflare Dashboard داده اجرا کنید. برای Tunnel مدیریت‌شده، Cloudflare فعلاً نصب سرویس Windows با Token را پشتیبانی می‌کند.
+
+بعد از نصب، سرویس `cloudflared` باید همراه Windows اجرا شود. این مهم است چون NIR هم سرویس خودکار `NIR Server` را دارد.
+
+## 5. فایروال و مودم
+
+برای Tunnel نباید Port Forward برای `3000` ایجاد شود.
+
+این‌ها را انجام ندهید:
+
+- `3000 → 192.168.0.49:3000` روی مودم ❌
+- `5432 → 192.168.0.49:5432` روی مودم ❌
+- باز کردن PostgreSQL برای اینترنت ❌
+
+NIR همچنان از داخل کارخانه با `http://192.168.0.49:3000` کار می‌کند و Tunnel از داخل Mini PC به Cloudflare وصل می‌شود.
+
+اگر شبکه خروجی محدود باشد، Mini PC باید بتواند به Cloudflare روی پورت `7844` ارتباط خروجی داشته باشد.
+
+## 6. تنظیم Secret مربوط به Session NIR
+
+NIR از `NIR_SESSION_SECRET` برای امضای Session استفاده می‌کند. اگر این متغیر را در `config.bat` تنظیم نکنید، برنامه یک مقدار پایدار مشتق‌شده از `DATABASE_URL` را به‌عنوان fallback استفاده می‌کند تا نصب فعلی از کار نیفتد.
+
+برای Production بهتر است یک Secret مستقل و تصادفی داخل `config.bat` محلی قرار دهید:
 
 ```env
-DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/nir
-DATABASE_SSL=false
-CLOUD_SYNC_URL=https://YOUR-CLOUDFLARE-DOMAIN.example
-CLOUD_SYNC_TOKEN=THE_SAME_SECRET_VALUE
+NIR_SESSION_SECRET=یک_رشته_تصادفی_طولانی
+NIR_SESSION_TTL_MS=43200000
 ```
 
-هر بار که PostgreSQL یک سند را تغییر دهد، Mini PC آن را بدون متوقف کردن تراکنش محلی به Cloudflare نیز Mirror می‌کند.
+`config.bat` در GitHub ذخیره نشود و مقدار Secret نیز هیچ‌وقت داخل کد یا `VITE_*` قرار نگیرد.
 
-## 5. Build و Deploy رابط اضطراری
+## 7. تست نهایی
 
-```bash
-npm install
-npm run cloudflare:build
-npx wrangler deploy
+بعد از نصب Tunnel و اتصال دامنه:
+
+### داخل کارخانه
+
+```text
+http://192.168.0.49:3000
 ```
 
-Cloudflare فایل‌های داخل `dist/client` را به‌عنوان Static Assets منتشر می‌کند و `/api/storage/*` را به Worker می‌فرستد.
+### خارج از کارخانه با اینترنت موبایل
 
-## 6. حالت‌های عملیاتی
+```text
+https://nir.example.com
+```
 
-### حالت عادی
+باید صفحه ورود معمول NIR نمایش داده شود. همان رمز قبلی را وارد کنید.
 
-`موبایل/PC -> Mini PC -> PostgreSQL`
+پس از ورود، APIهای داده و پشتیبان‌گیری فقط با Session معتبر قابل استفاده هستند.
 
-و هم‌زمان:
+## 8. اگر Mini PC خاموش باشد
 
-`PostgreSQL -> Cloudflare D1`
+Tunnel هم خاموش می‌شود و آدرس اصلی NIR در دسترس نخواهد بود. در این مرحله Cloudflare D1 همچنان می‌تواند آخرین Snapshot سینک‌شده را برای حالت اضطراری نگه دارد؛ این Replica عمداً Master دوم نیست.
 
-### خاموش شدن Mini PC
+## 9. معماری نهایی
 
-`موبایل -> Cloudflare -> D1`
+```text
+                  اینترنت موبایل
+                       │
+                       ▼
+              https://nir.example.com
+                       │
+                       ▼
+               ☁️ Cloudflare
+                       │
+                Cloudflare Tunnel
+                       │
+                       ▼
+              🖥️ Mini PC کارخانه
+              192.168.0.49:3000
+                       │
+                       ▼
+                 NIR / Express
+                       │
+                       ▼
+                PostgreSQL Master
 
-کاربر آخرین Snapshot همگام‌شده را می‌بیند.
+                ─────────────────
 
-### قطع Cloudflare
+             PostgreSQL → D1 Replica
+                  (اضطراری/خواندنی)
+```
 
-`PC/موبایل داخل کارخانه -> Mini PC -> PostgreSQL`
-
-سیستم محلی مستقل می‌ماند.
-
-### قطع اینترنت کارخانه
-
-دسترسی بیرونی ممکن نیست، اما شبکه داخلی و Mini PC همچنان کار می‌کنند.
-
-## نکته مهم
-
-در حالت اضطراری Cloudflare، D1 فعلاً **Read Replica** است و از داخل برنامه Master دوم ساخته نمی‌شود. بنابراین هنگام برگشت Mini PC، داده‌ها دچار دو Master و Conflict ناخواسته نمی‌شوند.
-
-اگر بعداً نیاز باشد در زمان خاموشی Mini PC نیز از موبایل «ثبت/ویرایش» انجام شود، باید مرحله دوم معماری یعنی Offline Write Queue و Conflict Resolution اضافه شود؛ این قابلیت عمداً در این مرحله فعال نشده تا یکپارچگی داده‌های کارخانه حفظ شود.
+این طراحی باعث می‌شود دسترسی اینترنتی اضافه شود، بدون اینکه PostgreSQL یا پورت 3000 مستقیماً در اینترنت قابل دسترسی باشند.

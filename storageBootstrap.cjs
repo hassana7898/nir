@@ -2,6 +2,7 @@ const Module = require('module');
 const originalLoad = Module._load;
 const originalExpress = require('express');
 const { Pool } = require('pg');
+const { requireAuth } = require('./serverAuth.cjs');
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const DEFAULT_COLLECTION = process.env.STORAGE_COLLECTION || 'poultryData';
@@ -95,6 +96,12 @@ function installStorageApi(app) {
   if (app.__postgresStorageInstalled) return;
   app.__postgresStorageInstalled = true;
   app.use(originalExpress.json({ limit: MAX_BODY }));
+
+  // Storage is the data API. Health stays public for monitoring; all data reads/writes require NIR login.
+  app.use('/api/storage', (req, res, next) => {
+    if (req.path === '/health') return next();
+    return requireAuth(req, res, next);
+  });
 
   app.get('/api/storage/health', async (_req, res) => {
     try {
