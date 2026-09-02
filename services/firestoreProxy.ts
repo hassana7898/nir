@@ -37,7 +37,27 @@ export const getDoc = async (ref: DocRef): Promise<SnapshotDoc> => {
 
 export const getDocs = async (ref: CollectionRef) => {
   const result = await request(`${API_BASE}/${encodeURIComponent(ref.collection)}`);
-  const documents = Array.isArray(result?.documents) ? result.documents : [];
+  let documents = Array.isArray(result?.documents) ? result.documents : [];
+
+  // First-device migration: if PostgreSQL is empty but this browser already has
+  // local data from the old version, copy that data to the central database.
+  if (documents.length === 0 && typeof window !== 'undefined' && window.localStorage.length > 0) {
+    const migrated: any[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      const value = window.localStorage.getItem(key);
+      if (value === null) continue;
+      try {
+        await setDoc({ __type: 'doc', collection: ref.collection, id: key }, { value });
+        migrated.push({ id: key, data: { value } });
+      } catch (error) {
+        console.error('Local data migration failed for key', key, error);
+      }
+    }
+    if (migrated.length) documents = migrated;
+  }
+
   const docs = documents.map((item: any) => ({ id: item.id, data: () => item.data, exists: () => true }));
   return { docs, forEach(callback: (doc: SnapshotDoc) => void) { docs.forEach(callback); } };
 };
