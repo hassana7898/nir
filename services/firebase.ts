@@ -1,8 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "firebase/firestore";
-import firebaseConfig from "../firebase-applet-config.json";
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-
-export { app, db };
+// Firebase has been removed from the application.
+// Kept as a compatibility module for the existing data service.
+// Persistence is now handled by the Chabokan PostgreSQL API.
+export const app = null;
+export const db = { __postgresStorage: true };
