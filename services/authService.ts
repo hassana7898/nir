@@ -1,5 +1,7 @@
 import { db } from './firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { randomBytes } from '@noble/hashes/utils.js';
 
 const PASSWORD_HASH_KEY = 'poultryAppPasswordHash';
 const PASSWORD_SALT_KEY = 'poultryAppPasswordSalt';
@@ -13,16 +15,21 @@ const saveServer = async (key: string, value: string): Promise<void> => {
     await setDoc(doc(db, 'poultryData', key), { value });
 };
 
-const bufferToHex = (buffer: ArrayBuffer): string => {
-    return [...new Uint8Array(buffer)]
+const bytesToHex = (bytes: Uint8Array): string => {
+    return Array.from(bytes)
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 };
 
-const hashPassword = async (password: string, salt: string): Promise<string> => {
+/**
+ * SHA-256 must also work when NIR is opened over plain HTTP on a LAN IP.
+ * Web Crypto's SubtleCrypto is restricted to secure contexts on many browsers,
+ * so use the audited, browser-compatible noble-hashes implementation instead.
+ * The algorithm remains SHA-256(password + salt), preserving existing passwords.
+ */
+const hashPassword = (password: string, salt: string): string => {
     const data = new TextEncoder().encode(password + salt);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    return bufferToHex(hashBuffer);
+    return bytesToHex(sha256(data));
 };
 
 /**
@@ -63,7 +70,6 @@ export const initializeAuth = async (): Promise<boolean> => {
         return false;
     } catch (error) {
         // If the server is temporarily unavailable, keep a valid local cache.
-        // This allows an already-configured device to continue operating offline.
         console.error('Authentication initialization failed:', error);
         return Boolean(localHash && localSalt);
     }
@@ -77,8 +83,8 @@ export const isPasswordSet = (): boolean => {
 };
 
 export const setPassword = async (password: string): Promise<void> => {
-    const salt = bufferToHex(crypto.getRandomValues(new Uint8Array(16)));
-    const hash = await hashPassword(password, salt);
+    const salt = bytesToHex(randomBytes(16));
+    const hash = hashPassword(password, salt);
 
     // The server must succeed before the new password is considered configured.
     await Promise.all([
@@ -91,8 +97,6 @@ export const setPassword = async (password: string): Promise<void> => {
 };
 
 export const clearPassword = async (): Promise<void> => {
-    // Keep the existing semantics: empty values are written to the server,
-    // then removed locally so the next initialization treats auth as unset.
     await Promise.all([
         saveServer(PASSWORD_SALT_KEY, ''),
         saveServer(PASSWORD_HASH_KEY, ''),
@@ -105,7 +109,6 @@ export const verifyPassword = async (password: string): Promise<boolean> => {
     let salt = localStorage.getItem(PASSWORD_SALT_KEY);
     let storedHash = localStorage.getItem(PASSWORD_HASH_KEY);
 
-    // Always refresh from the central store when local credentials are missing.
     if (!salt || !storedHash) {
         const initialized = await initializeAuth();
         if (!initialized) return false;
@@ -115,7 +118,7 @@ export const verifyPassword = async (password: string): Promise<boolean> => {
 
     if (!salt || !storedHash) return false;
 
-    const hash = await hashPassword(password, salt);
+    const hash = hashPassword(password, salt);
     return hash === storedHash;
 };
 
