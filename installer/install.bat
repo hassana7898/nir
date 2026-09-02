@@ -19,7 +19,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-for /f "tokens=1 delims=v" %%v in ('node -v') do set NODE_MAJOR=%%v
+for /f "tokens=1 delims=v." %%v in ('node -v') do set NODE_MAJOR=%%v
 for /f "tokens=*" %%v in ('node -v') do set NODE_VERSION=%%v
 echo Node.js: %NODE_VERSION%
 
