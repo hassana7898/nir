@@ -3,6 +3,7 @@ import path from "path";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import { installAutomaticBackup } from "./automaticBackup.cjs";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -13,6 +14,8 @@ const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "50mb";
 const allowedOrigin = process.env.CORS_ORIGIN;
 app.use(cors(allowedOrigin ? { origin: allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean) } : undefined));
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+installAutomaticBackup(app);
 
 let ai: GoogleGenAI | null = null;
 const apiKey = process.env.GEMINI_API_KEY?.trim();
