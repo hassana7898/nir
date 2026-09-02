@@ -4,6 +4,7 @@ type CollectionRef = { __type: 'collection'; collection: string };
 type SnapshotDoc = { id: string; data: () => any; exists: () => boolean };
 
 const API_BASE = '/api/storage';
+const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace(/\/$/, '') || '';
 const POLL_MS = 30000;
 
 const request = async (url: string, options?: RequestInit) => {
@@ -20,23 +21,50 @@ const request = async (url: string, options?: RequestInit) => {
   return response.json();
 };
 
+const cloudRequest = async (path: string, options?: RequestInit) => {
+  if (!CLOUD_API_BASE) throw new Error('Cloud storage URL is not configured');
+  return request(`${CLOUD_API_BASE}${path}`, options);
+};
+
+const withCloudFallback = async (path: string, options?: RequestInit) => {
+  try {
+    return await request(`${API_BASE}${path}`, options);
+  } catch (localError) {
+    if (!CLOUD_API_BASE) throw localError;
+    console.warn('Local server unavailable; using Cloudflare emergency storage.', localError);
+    return cloudRequest(path, { ...options, method: options?.method === 'PUT' ? 'GET' : options?.method });
+  }
+};
+
 export const getFirestore = (..._args: any[]): ProxyDb => ({ __postgresStorage: true });
 export const doc = (_db: any, collectionName: string, id: string): DocRef => ({ __type: 'doc', collection: collectionName, id });
 export const collection = (_db: any, collectionName: string): CollectionRef => ({ __type: 'collection', collection: collectionName });
 
 export const setDoc = async (ref: DocRef, data: any, _options?: any): Promise<void> => {
+  // Writes always target the local Mini PC master. Cloudflare is the emergency
+  // read replica, so a power outage never creates a second writable master.
   await request(`${API_BASE}/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`, {
     method: 'PUT', body: JSON.stringify(data),
   });
 };
 
 export const getDoc = async (ref: DocRef): Promise<SnapshotDoc> => {
-  const result = await request(`${API_BASE}/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`);
+  const path = `/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`;
+  const result = await withCloudFallback(path);
   return { id: ref.id, exists: () => Boolean(result?.exists), data: () => result?.data };
 };
 
 export const getDocs = async (ref: CollectionRef) => {
-  const result = await request(`${API_BASE}/${encodeURIComponent(ref.collection)}`);
+  const path = `/${encodeURIComponent(ref.collection)}`;
+  let result: any;
+  try {
+    result = await request(`${API_BASE}${path}`);
+  } catch (localError) {
+    if (!CLOUD_API_BASE) throw localError;
+    console.warn('Local server unavailable; loading latest cloud snapshot.', localError);
+    result = await cloudRequest(path);
+  }
+
   let documents = Array.isArray(result?.documents) ? result.documents : [];
 
   // First-device migration: if PostgreSQL is empty but this browser already has
