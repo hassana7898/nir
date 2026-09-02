@@ -11,12 +11,36 @@ const LoginPage: React.FC = () => {
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        if (loading) return;
         setError('');
         setLoading(true);
-        const success = await login(password);
-        if (!success) {
+        try {
+            const success = await login(password);
+            if (success) return;
+
             setError('رمز عبور اشتباه است');
             showToast('رمز عبور اشتباه است', 'error');
+        } catch (err) {
+            console.error('Login error:', err);
+            setError('ارتباط با سرور یا بررسی رمز عبور ناموفق بود. لطفاً دوباره تلاش کنید.');
+            showToast('خطا در بررسی رمز عبور', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleClearPassword = async () => {
+        if (loading) return;
+        setError('');
+        setLoading(true);
+        try {
+            await clearPassword();
+            showToast('رمز عبور بازنشانی شد', 'success');
+            window.location.reload();
+        } catch (err) {
+            console.error('Password reset error:', err);
+            setError('بازنشانی رمز عبور ناموفق بود.');
+            showToast('خطا در بازنشانی رمز عبور', 'error');
             setLoading(false);
         }
     };
@@ -36,8 +60,9 @@ const LoginPage: React.FC = () => {
                             className="w-full p-3 border rounded-lg text-center"
                             required
                             autoFocus
+                            disabled={loading}
                         />
-                         {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
+                        {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
                     </div>
                     <button
                         type="submit"
@@ -45,7 +70,15 @@ const LoginPage: React.FC = () => {
                         className="w-full bg-sky-500 text-white p-3 rounded-lg hover:bg-sky-600 transition-colors disabled:bg-sky-300"
                     >
                         {loading ? 'در حال بررسی...' : 'ورود'}
-                    </button><button type="button" onClick={async () => { await clearPassword(); showToast('رمز عبور بازنشانی شد', 'success'); window.location.reload(); }} className="w-full mt-3 bg-red-500 text-white p-3 rounded-lg hover:bg-red-600 transition-colors">حذف رمز عبور (بازیابی)</button>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleClearPassword}
+                        disabled={loading}
+                        className="w-full mt-3 bg-red-500 text-white p-3 rounded-lg hover:bg-red-600 transition-colors disabled:bg-red-300"
+                    >
+                        حذف رمز عبور (بازیابی)
+                    </button>
                 </form>
             </div>
         </div>
