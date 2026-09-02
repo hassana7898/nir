@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import EntryPage from '../pages/EntryPage';
 import ExitPage from '../pages/ExitPage';
@@ -14,6 +13,7 @@ import FarmersPage from '../pages/FarmersPage';
 import ActiveBroodsPage from '../pages/ActiveBroodsPage';
 import DashboardPage from '../pages/DashboardPage';
 import GlobalSearchPage from '../pages/GlobalSearchPage';
+import BackupPage from '../pages/BackupPage';
 
 const MainLayout: React.FC = () => {
     return (
@@ -34,6 +34,7 @@ const MainLayout: React.FC = () => {
                     <Route path="/reports" element={<ReportsPage />} />
                     <Route path="/log" element={<LogPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/backup" element={<BackupPage />} />
                 </Routes>
             </main>
         </div>
