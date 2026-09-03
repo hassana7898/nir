@@ -8,7 +8,7 @@ const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace
 const POLL_MS = 30000;
 const REQUEST_TIMEOUT_MS = 10000;
 
-const request = async (url: string, options?: RequestInit) => {
+const request = async (url: string, options?: RequestInit, credentials: RequestCredentials = 'same-origin') => {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -16,7 +16,7 @@ const request = async (url: string, options?: RequestInit) => {
       ...options,
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
-      credentials: 'same-origin',
+      credentials,
     });
     if (!response.ok) {
       let message = `Storage request failed (${response.status})`;
@@ -25,9 +25,7 @@ const request = async (url: string, options?: RequestInit) => {
     }
     return response.json();
   } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Storage server request timed out.');
-    }
+    if (error?.name === 'AbortError') throw new Error('Storage server request timed out.');
     throw error;
   } finally {
     window.clearTimeout(timeout);
@@ -36,15 +34,15 @@ const request = async (url: string, options?: RequestInit) => {
 
 const cloudRequest = async (path: string, options?: RequestInit) => {
   if (!CLOUD_API_BASE) throw new Error('Cloud storage URL is not configured');
-  return request(`${CLOUD_API_BASE}${path}`, options);
+  return request(`${CLOUD_API_BASE}${path}`, options, 'include');
 };
 
 const withCloudFallback = async (path: string, options?: RequestInit) => {
   try {
-    return await request(`${API_BASE}${path}`, options);
+    return await request(`${API_BASE}${path}`, options, 'same-origin');
   } catch (localError) {
     if (!CLOUD_API_BASE) throw localError;
-    console.warn('Local server unavailable; using Cloudflare emergency storage.', localError);
+    console.warn('Local server unavailable; using cloud replica.', localError);
     return cloudRequest(path, { ...options, method: options?.method === 'PUT' ? 'GET' : options?.method });
   }
 };
@@ -54,8 +52,7 @@ export const doc = (_db: any, collectionName: string, id: string): DocRef => ({ 
 export const collection = (_db: any, collectionName: string): CollectionRef => ({ __type: 'collection', collection: collectionName });
 
 export const setDoc = async (ref: DocRef, data: any, _options?: any): Promise<void> => {
-  // Writes always target the local Mini PC master. Cloudflare is the emergency
-  // read replica, so a power outage never creates a second writable master.
+  // Local PostgreSQL remains the single writable master. The cloud side is a replica.
   await request(`${API_BASE}/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`, {
     method: 'PUT', body: JSON.stringify(data),
   });
@@ -92,9 +89,7 @@ export const getDocs = async (ref: CollectionRef) => {
       try {
         await setDoc({ __type: 'doc', collection: ref.collection, id: key }, { value });
         migrated.push({ id: key, data: { value } });
-      } catch (error) {
-        console.error('Local data migration failed for key', key, error);
-      }
+      } catch (error) { console.error('Local data migration failed for key', key, error); }
     }
     if (migrated.length) documents = migrated;
   }
