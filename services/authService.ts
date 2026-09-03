@@ -20,7 +20,6 @@ const api = async (path: string, options: RequestInit = {}): Promise<Response> =
         const localResponse = await request('', path, options);
         if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
         // A static host has no /api routes and normally returns 404; use the cloud API.
-        // Real authentication errors (401) remain local when the local server exists.
         if (localResponse.status !== 404 && localResponse.status < 500 && localResponse.status !== 401) return localResponse;
         if (localResponse.status === 401 && path === '/api/auth/login') return localResponse;
     } catch {}
@@ -38,6 +37,13 @@ export const initializeAuth = async (): Promise<boolean> => {
         const configured = Boolean(data.passwordSet);
         if (configured) localStorage.setItem(PASSWORD_SET_KEY, 'true');
         else localStorage.removeItem(PASSWORD_SET_KEY);
+
+        const sessionResponse = await api('/api/auth/session');
+        if (sessionResponse.ok) {
+            const session = await sessionResponse.json();
+            if (session.authenticated) sessionStorage.setItem(SESSION_KEY, 'true');
+            else sessionStorage.removeItem(SESSION_KEY);
+        }
         return configured;
     } catch (error) {
         console.error('Authentication initialization failed:', error);
