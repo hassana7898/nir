@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'supabase/**'
+      - '.github/workflows/deploy-supabase.yml'
   workflow_dispatch:
 
 permissions:
