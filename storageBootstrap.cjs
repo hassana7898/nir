@@ -48,6 +48,15 @@ async function initDb() {
       next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (collection_name, document_id)
     )`);
+    // On the first cloud-enabled startup, queue the complete current local snapshot.
+    if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN) {
+      await db.query(`INSERT INTO cloud_sync_queue (collection_name, document_id, data, queued_at, attempts, next_attempt_at)
+        SELECT collection_name, document_id, data, NOW(), 0, NOW()
+        FROM app_storage
+        WHERE collection_name=$1
+        ON CONFLICT (collection_name, document_id) DO UPDATE SET
+          data=EXCLUDED.data, queued_at=NOW(), attempts=0, next_attempt_at=NOW()`, [DEFAULT_COLLECTION]);
+    }
     return db;
   })().catch((error) => { initPromise = null; throw error; });
   return initPromise;
@@ -97,7 +106,6 @@ function installStorageApi(app) {
   app.__postgresStorageInstalled = true;
   app.use(originalExpress.json({ limit: MAX_BODY }));
 
-  // Storage is the data API. Health stays public for monitoring; all data reads/writes require NIR login.
   app.use('/api/storage', (req, res, next) => {
     if (req.path === '/health') return next();
     return requireAuth(req, res, next);
