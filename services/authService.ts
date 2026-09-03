@@ -19,8 +19,10 @@ const api = async (path: string, options: RequestInit = {}): Promise<Response> =
     try {
         const localResponse = await request('', path, options);
         if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
-        // Authentication endpoints must be available even when the Mini PC is off.
-        if (localResponse.status < 500 && localResponse.status !== 401) return localResponse;
+        // A static host has no /api routes and normally returns 404; use the cloud API.
+        // Real authentication errors (401) remain local when the local server exists.
+        if (localResponse.status !== 404 && localResponse.status < 500 && localResponse.status !== 401) return localResponse;
+        if (localResponse.status === 401 && path === '/api/auth/login') return localResponse;
     } catch {}
     if (!CLOUD_API_BASE) throw new Error('Authentication server unavailable');
     return request(CLOUD_API_BASE, path, options);
