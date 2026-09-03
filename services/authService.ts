@@ -2,6 +2,7 @@ const PASSWORD_SET_KEY = 'poultryAppPasswordConfigured';
 const LEGACY_PASSWORD_HASH_KEY = 'poultryAppPasswordHash';
 const LEGACY_PASSWORD_SALT_KEY = 'poultryAppPasswordSalt';
 const SESSION_KEY = 'poultryAppSession';
+const CLOUD_SESSION_KEY = 'nirCloudSession';
 const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace(/\/$/, '') || '';
 
 const clearLegacyBrowserCredentials = () => {
@@ -9,27 +10,30 @@ const clearLegacyBrowserCredentials = () => {
     localStorage.removeItem(LEGACY_PASSWORD_SALT_KEY);
 };
 
-const request = async (base: string, path: string, options: RequestInit = {}): Promise<Response> => fetch(`${base}${path}`, {
-    ...options,
-    credentials: base ? 'include' : 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-});
+const getCloudSession = () => localStorage.getItem(CLOUD_SESSION_KEY) || '';
+
+const request = async (base: string, path: string, options: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(options.headers || {});
+    headers.set('Content-Type', 'application/json');
+    const cloudSession = base ? getCloudSession() : '';
+    if (cloudSession) headers.set('X-NIR-Session', cloudSession);
+    return fetch(`${base}${path}`, {
+        ...options,
+        credentials: base ? 'include' : 'same-origin',
+        headers,
+    });
+};
 
 const api = async (path: string, options: RequestInit = {}): Promise<Response> => {
-    let localResponse: Response | null = null;
     try {
-        localResponse = await request('', path, options);
+        const localResponse = await request('', path, options);
         if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
-        // GitHub Pages is a static host, so /api/* may return 404/405. In either
-        // case continue to the Supabase cloud API. Keep a real 401 from login so
-        // a wrong password is not hidden by the cloud fallback.
         if (localResponse.status === 401 && path === '/api/auth/login') return localResponse;
     } catch {}
     if (!CLOUD_API_BASE) throw new Error('Authentication server unavailable');
     return request(CLOUD_API_BASE, path, options);
 };
 
-/** Server is the authentication source of truth; no password or password hash is stored in the browser. */
 export const initializeAuth = async (): Promise<boolean> => {
     clearLegacyBrowserCredentials();
     try {
@@ -72,6 +76,7 @@ export const clearPassword = async (): Promise<void> => {
     localStorage.removeItem(PASSWORD_SET_KEY);
     clearLegacyBrowserCredentials();
     sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(CLOUD_SESSION_KEY);
 };
 
 export const verifyPassword = async (password: string): Promise<boolean> => {
@@ -79,6 +84,7 @@ export const verifyPassword = async (password: string): Promise<boolean> => {
         const response = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) });
         if (!response.ok) return false;
         const data = await response.json();
+        if (data?.session) localStorage.setItem(CLOUD_SESSION_KEY, data.session);
         return Boolean(data.ok);
     } catch (error) {
         console.error('Login failed:', error);
@@ -90,6 +96,7 @@ export const login = (): void => sessionStorage.setItem(SESSION_KEY, 'true');
 
 export const logout = (): void => {
     sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(CLOUD_SESSION_KEY);
     void api('/api/auth/logout', { method: 'POST' }).catch(() => {});
 };
 
