@@ -2,17 +2,29 @@ const PASSWORD_SET_KEY = 'poultryAppPasswordConfigured';
 const LEGACY_PASSWORD_HASH_KEY = 'poultryAppPasswordHash';
 const LEGACY_PASSWORD_SALT_KEY = 'poultryAppPasswordSalt';
 const SESSION_KEY = 'poultryAppSession';
+const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace(/\/$/, '') || '';
 
 const clearLegacyBrowserCredentials = () => {
     localStorage.removeItem(LEGACY_PASSWORD_HASH_KEY);
     localStorage.removeItem(LEGACY_PASSWORD_SALT_KEY);
 };
 
-const api = async (url: string, options: RequestInit = {}): Promise<Response> => fetch(url, {
+const request = async (base: string, path: string, options: RequestInit = {}): Promise<Response> => fetch(`${base}${path}`, {
     ...options,
-    credentials: 'same-origin',
+    credentials: base ? 'include' : 'same-origin',
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
 });
+
+const api = async (path: string, options: RequestInit = {}): Promise<Response> => {
+    try {
+        const localResponse = await request('', path, options);
+        if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
+        // Authentication endpoints must be available even when the Mini PC is off.
+        if (localResponse.status < 500 && localResponse.status !== 401) return localResponse;
+    } catch {}
+    if (!CLOUD_API_BASE) throw new Error('Authentication server unavailable');
+    return request(CLOUD_API_BASE, path, options);
+};
 
 /** Server is the authentication source of truth; no password or password hash is stored in the browser. */
 export const initializeAuth = async (): Promise<boolean> => {
@@ -27,7 +39,6 @@ export const initializeAuth = async (): Promise<boolean> => {
         return configured;
     } catch (error) {
         console.error('Authentication initialization failed:', error);
-        // This is only a UI hint; it never grants API access.
         return localStorage.getItem(PASSWORD_SET_KEY) === 'true';
     }
 };
@@ -69,7 +80,7 @@ export const login = (): void => sessionStorage.setItem(SESSION_KEY, 'true');
 
 export const logout = (): void => {
     sessionStorage.removeItem(SESSION_KEY);
-    void api('/api/auth/logout', { method: 'POST' });
+    void api('/api/auth/logout', { method: 'POST' }).catch(() => {});
 };
 
 export const isAuthenticated = (): boolean => sessionStorage.getItem(SESSION_KEY) === 'true';
