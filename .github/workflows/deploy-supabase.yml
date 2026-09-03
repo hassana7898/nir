@@ -27,7 +27,7 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.116.0
 
       - name: Deploy nir-api
         run: supabase functions deploy nir-api --project-ref "$SUPABASE_PROJECT_ID" --use-api
