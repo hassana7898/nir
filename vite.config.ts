@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, (process as any).cwd(), '');
+  const isGitHubPages = env.GITHUB_PAGES === 'true';
   return {
+    base: isGitHubPages ? '/nir/' : '/',
     plugins: [react()],
     resolve: {
       dedupe: ['react', 'react-dom'],
@@ -12,8 +14,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      // Client assets live in a dedicated directory so Cloudflare never serves
-      // the Node.js server bundle as a public static asset.
+      // Client assets live in a dedicated directory for the Node server and static deployment.
       outDir: 'dist/client',
       target: 'esnext',
       minify: false,
