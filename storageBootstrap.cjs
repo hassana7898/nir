@@ -18,7 +18,7 @@ let pool = null;
 let initPromise = null;
 let syncTimer = null;
 let syncing = false;
-let initialSnapshotQueued = false;
+let initialSnapshotSynchronized = false;
 
 function getPool() {
   if (pool) return pool;
@@ -29,6 +29,72 @@ function getPool() {
     max: Number(process.env.DB_POOL_MAX || 10),
   });
   return pool;
+}
+
+function parseCloudDate(value) {
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+async function pullCloudSnapshot(db) {
+  if (!CLOUD_SYNC_URL || !CLOUD_SYNC_TOKEN) return;
+
+  const response = await fetch(`${CLOUD_SYNC_URL}/api/storage/${encodeURIComponent(DEFAULT_COLLECTION)}`, {
+    method: 'GET',
+    headers: { 'X-NIR-Sync-Token': CLOUD_SYNC_TOKEN },
+  });
+  if (!response.ok) {
+    throw new Error(`Cloud snapshot pull failed (${response.status}) ${await response.text().catch(() => '')}`);
+  }
+
+  const payload = await response.json();
+  const documents = Array.isArray(payload?.documents) ? payload.documents : [];
+
+  // Merge cloud changes into PostgreSQL using updated_at as the conflict rule.
+  // Cloud wins only when it is newer; otherwise the local record remains the
+  // source of truth and is queued for upload below.
+  for (const remote of documents) {
+    if (!remote?.id) continue;
+    const localResult = await db.query(
+      'SELECT data, updated_at FROM app_storage WHERE collection_name=$1 AND document_id=$2 LIMIT 1',
+      [DEFAULT_COLLECTION, remote.id]
+    );
+    const local = localResult.rows[0];
+    const remoteTime = parseCloudDate(remote.updatedAt);
+    const localTime = local ? new Date(local.updated_at).getTime() : 0;
+
+    if (!local || remoteTime > localTime) {
+      await db.query(
+        `INSERT INTO app_storage (collection_name, document_id, data, updated_at)
+         VALUES ($1,$2,$3::jsonb,$4::timestamptz)
+         ON CONFLICT (collection_name,document_id) DO UPDATE SET
+           data=EXCLUDED.data, updated_at=EXCLUDED.updated_at`,
+        [DEFAULT_COLLECTION, remote.id, JSON.stringify(remote.data ?? {}), remote.updatedAt || new Date().toISOString()]
+      );
+    }
+  }
+
+  // Any local record newer than its cloud counterpart must be sent back to
+  // Supabase. This preserves factory-side edits instead of blindly overwriting them.
+  const localRows = await db.query(
+    'SELECT document_id, data, updated_at FROM app_storage WHERE collection_name=$1',
+    [DEFAULT_COLLECTION]
+  );
+  const remoteById = new Map(documents.map((item) => [item.id, item]));
+  for (const row of localRows.rows) {
+    const remote = remoteById.get(row.document_id);
+    const localTime = new Date(row.updated_at).getTime();
+    const remoteTime = remote ? parseCloudDate(remote.updatedAt) : 0;
+    if (!remote || localTime > remoteTime) {
+      await db.query(
+        `INSERT INTO cloud_sync_queue (collection_name, document_id, data, queued_at, attempts, next_attempt_at)
+         VALUES ($1,$2,$3::jsonb,NOW(),0,NOW())
+         ON CONFLICT (collection_name,document_id) DO UPDATE SET
+           data=EXCLUDED.data, queued_at=NOW(), attempts=0, next_attempt_at=NOW()`,
+        [DEFAULT_COLLECTION, row.document_id, JSON.stringify(row.data)]
+      );
+    }
+  }
 }
 
 async function initDb() {
@@ -53,13 +119,18 @@ async function initDb() {
       next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (collection_name, document_id)
     )`);
-    if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN && !initialSnapshotQueued) {
-      await db.query(`INSERT INTO cloud_sync_queue (collection_name, document_id, data, queued_at, attempts, next_attempt_at)
-        SELECT collection_name, document_id, data, NOW(), 0, NOW()
-        FROM app_storage WHERE collection_name=$1
-        ON CONFLICT (collection_name, document_id) DO UPDATE SET
-          data=EXCLUDED.data, queued_at=NOW(), attempts=0, next_attempt_at=NOW()`, [DEFAULT_COLLECTION]);
-      initialSnapshotQueued = true;
+
+    if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN && !initialSnapshotSynchronized) {
+      // IMPORTANT: pull first, then queue only local-newer records. This is the
+      // bridge that brings records created on the web back into the factory PC.
+      try {
+        await pullCloudSnapshot(db);
+      } catch (error) {
+        // Cloud can be temporarily unavailable. PostgreSQL remains usable and
+        // the normal upload queue will retry later.
+        console.error('[Cloud snapshot] pull failed:', error?.message || error);
+      }
+      initialSnapshotSynchronized = true;
     }
     return db;
   })().catch((error) => { initPromise = null; throw error; });
