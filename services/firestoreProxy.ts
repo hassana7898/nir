@@ -34,7 +34,9 @@ const request = async (url: string, options?: RequestInit, credentials: RequestC
 
 const cloudRequest = async (path: string, options?: RequestInit) => {
   if (!CLOUD_API_BASE) throw new Error('Cloud storage URL is not configured');
-  return request(`${CLOUD_API_BASE}${path}`, options, 'include');
+  // The Supabase Edge Function is mounted at /nir-api, while its application
+  // routes live under /api/... . Local and cloud paths therefore differ here.
+  return request(`${CLOUD_API_BASE}/api/storage${path}`, options, 'include');
 };
 
 const withCloudFallback = async (path: string, options?: RequestInit) => {
