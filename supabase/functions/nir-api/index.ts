@@ -38,12 +38,6 @@ function parseCookies(req: Request) {
   return out;
 }
 
-function bytesToB64(bytes: Uint8Array) {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
 function bytesToHex(bytes: Uint8Array) { return [...bytes].map(b => b.toString(16).padStart(2, "0")).join(""); }
 
 async function sha256(text: string) {
@@ -121,7 +115,8 @@ async function setupPassword(req: Request) {
 async function storage(req: Request, parts: string[]) {
   if (parts[0] !== COLLECTION) return response(req, { error: "Collection not found" }, 404);
   const syncRequest = Boolean(SYNC_TOKEN) && (req.headers.get("X-NIR-Sync-Token") || "") === SYNC_TOKEN;
-  if (!syncRequest && !(await verifyCloudSession(req))) return response(req, { error: "احراز هویت لازم است." }, 401);
+  const cloudSession = syncRequest ? false : await verifyCloudSession(req);
+  if (!syncRequest && !cloudSession) return response(req, { error: "احراز هویت لازم است." }, 401);
 
   if (req.method === "GET" && parts.length === 1) {
     const { data, error } = await supabase.from("app_storage").select("document_id,data,updated_at").eq("collection_name", COLLECTION).order("updated_at", { ascending: true });
@@ -134,7 +129,7 @@ async function storage(req: Request, parts: string[]) {
     if (!data) return response(req, { exists: false, data: null, id: parts[1] });
     return response(req, { exists: true, id: data.document_id, data: data.data, updatedAt: data.updated_at });
   }
-  if (req.method === "PUT" && parts.length === 2 && syncRequest) {
+  if (req.method === "PUT" && parts.length === 2) {
     const body = await req.json().catch(() => undefined);
     if (body === undefined) return response(req, { error: "JSON body is required" }, 400);
     const { data, error } = await supabase.from("app_storage").upsert({ collection_name: COLLECTION, document_id: parts[1], data: body, updated_at: new Date().toISOString() }, { onConflict: "collection_name,document_id" }).select("document_id,data,updated_at").single();
