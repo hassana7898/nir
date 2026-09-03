@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { migrateLegacyData, initializeFirebaseSync } from './services/dataService';
@@ -8,8 +7,16 @@ import LoginPage from './pages/LoginPage';
 import SetupPage from './pages/SetupPage';
 import MainLayout from './components/MainLayout';
 
-const AppContent: React.FC = () => {
+const AppContent: React.FC<{ onSyncUpdate: () => void }> = ({ onSyncUpdate }) => {
     const { isAuthenticated, isPasswordSet, loading } = useAuth();
+
+    useEffect(() => {
+        // Cloud storage requires the authenticated NIR session. The previous
+        // implementation started this before login, received 401, and then
+        // never retried, leaving GitHub Pages with stale/empty localStorage.
+        if (!isAuthenticated) return;
+        void initializeFirebaseSync(onSyncUpdate);
+    }, [isAuthenticated, onSyncUpdate]);
 
     if (loading) {
         return (
@@ -32,23 +39,23 @@ const AppContent: React.FC = () => {
     );
 };
 
-
 const App: React.FC = () => {
     const [syncTrigger, setSyncTrigger] = useState(0);
 
     useEffect(() => {
-        // Run data migration once on app load
+        // Run data migration once on app load. This only initializes local
+        // defaults; cloud data is loaded after successful authentication.
         migrateLegacyData();
-        
-        initializeFirebaseSync(() => {
-            setSyncTrigger(t => t + 1);
-        });
     }, []);
+
+    const handleSyncUpdate = () => {
+        setSyncTrigger(t => t + 1);
+    };
 
     return (
         <SettingsProvider key={syncTrigger}>
             <AuthProvider>
-                <AppContent />
+                <AppContent onSyncUpdate={handleSyncUpdate} />
             </AuthProvider>
         </SettingsProvider>
     );
