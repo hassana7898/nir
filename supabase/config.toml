@@ -1,0 +1,4 @@
+project_id = ""
+
+[functions.nir-api]
+verify_jwt = false
