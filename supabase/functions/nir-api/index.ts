@@ -16,7 +16,7 @@ function corsHeaders(req: Request): HeadersInit {
   return {
     "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Headers": "authorization, apikey, x-client-info, content-type, x-nir-sync-token",
+    "Access-Control-Allow-Headers": "authorization, apikey, x-client-info, content-type, x-nir-sync-token, x-nir-session",
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Vary": "Origin",
     "Content-Type": "application/json",
@@ -64,11 +64,9 @@ async function getPasswordRecord() {
   return { hash: values.poultryAppPasswordHash || "", salt: values.poultryAppPasswordSalt || "" };
 }
 
-async function verifyCloudSession(req: Request) {
+async function verifySessionToken(token: string) {
   const { hash, salt } = await getPasswordRecord();
-  if (!hash || !salt) return false;
-  const token = parseCookies(req)[SESSION_COOKIE];
-  if (!token) return false;
+  if (!hash || !salt || !token) return false;
   const parts = token.split(".");
   if (parts.length !== 3) return false;
   const issuedAt = Number(parts[0]);
@@ -77,6 +75,13 @@ async function verifyCloudSession(req: Request) {
   if (!(await timingSafeEqual(parts[1], version))) return false;
   const expected = await hmacHex(hash, `${issuedAt}.${version}`);
   return timingSafeEqual(parts[2], expected);
+}
+
+async function verifyCloudSession(req: Request) {
+  const headerToken = req.headers.get("X-NIR-Session") || "";
+  if (headerToken && await verifySessionToken(headerToken)) return true;
+  const cookieToken = parseCookies(req)[SESSION_COOKIE] || "";
+  return verifySessionToken(cookieToken);
 }
 
 async function login(req: Request) {
@@ -91,7 +96,7 @@ async function login(req: Request) {
   const version = await hmacHex(record.hash, `password-version:${record.hash}`);
   const signature = await hmacHex(record.hash, `${issuedAt}.${version}`);
   const token = `${issuedAt}.${version}.${signature}`;
-  return response(req, { ok: true }, 200, { "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` });
+  return response(req, { ok: true, session: token }, 200, { "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` });
 }
 
 async function setupPassword(req: Request) {
