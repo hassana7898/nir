@@ -5,7 +5,8 @@ type SnapshotDoc = { id: string; data: () => any; exists: () => boolean };
 
 const API_BASE = '/api/storage';
 const CLOUD_API_BASE = (import.meta as any).env?.VITE_CLOUD_STORAGE_URL?.replace(/\/$/, '') || '';
-const POLL_MS = 30000;
+const CLOUD_SESSION_KEY = 'nirCloudSession';
+const POLL_MS = 10000;
 const REQUEST_TIMEOUT_MS = 10000;
 
 const request = async (url: string, options?: RequestInit, credentials: RequestCredentials = 'same-origin') => {
@@ -34,7 +35,10 @@ const request = async (url: string, options?: RequestInit, credentials: RequestC
 
 const cloudRequest = async (path: string, options?: RequestInit) => {
   if (!CLOUD_API_BASE) throw new Error('Cloud storage URL is not configured');
-  return request(`${CLOUD_API_BASE}/api/storage${path}`, options, 'include');
+  const headers = new Headers(options?.headers || {});
+  const token = typeof window !== 'undefined' ? localStorage.getItem(CLOUD_SESSION_KEY) : '';
+  if (token) headers.set('X-NIR-Session', token);
+  return request(`${CLOUD_API_BASE}/api/storage${path}`, { ...options, headers }, 'include');
 };
 
 const withCloudFallback = async (path: string, options?: RequestInit) => {
@@ -43,8 +47,6 @@ const withCloudFallback = async (path: string, options?: RequestInit) => {
   } catch (localError) {
     if (!CLOUD_API_BASE) throw localError;
     console.warn('Local server unavailable; using cloud replica.', localError);
-    // A browser without the local NIR server must never attempt a cloud PUT
-    // through this fallback. Cloud writes are handled explicitly by setDoc.
     return cloudRequest(path, { ...options, method: options?.method === 'PUT' ? 'GET' : options?.method });
   }
 };
@@ -55,20 +57,13 @@ export const collection = (_db: any, collectionName: string): CollectionRef => (
 
 export const setDoc = async (ref: DocRef, data: any, _options?: any): Promise<void> => {
   const path = `/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`;
-
-  // The factory PC writes to PostgreSQL. A static/cloud-only browser writes
-  // directly to Supabase. This makes the same dataService API work in both modes.
   try {
-    await request(`${API_BASE}${path}`, {
-      method: 'PUT', body: JSON.stringify(data),
-    }, 'same-origin');
+    await request(`${API_BASE}${path}`, { method: 'PUT', body: JSON.stringify(data) }, 'same-origin');
     return;
   } catch (localError) {
     if (!CLOUD_API_BASE) throw localError;
     console.warn('Local server unavailable; writing directly to cloud replica.', localError);
-    await cloudRequest(path, {
-      method: 'PUT', body: JSON.stringify(data),
-    });
+    await cloudRequest(path, { method: 'PUT', body: JSON.stringify(data) });
   }
 };
 
@@ -91,8 +86,6 @@ export const getDocs = async (ref: CollectionRef) => {
 
   let documents = Array.isArray(result?.documents) ? result.documents : [];
 
-  // First-device migration: if PostgreSQL is empty but this browser already has
-  // local data from the old version, copy that data to the central database.
   if (documents.length === 0 && typeof window !== 'undefined' && window.localStorage.length > 0) {
     const migrated: any[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
