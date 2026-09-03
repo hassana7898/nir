@@ -22,7 +22,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       GITHUB_PAGES: 'true'
-      VITE_CLOUD_STORAGE_URL: ${{ vars.NIR_CLOUD_STORAGE_URL }}
+      VITE_CLOUD_STORAGE_URL: https://mauudyxnhprhqydfpamd.supabase.co/functions/v1/nir-api
     steps:
       - name: Checkout
         uses: actions/checkout@v4
