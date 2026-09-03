@@ -16,12 +16,13 @@ const request = async (base: string, path: string, options: RequestInit = {}): P
 });
 
 const api = async (path: string, options: RequestInit = {}): Promise<Response> => {
+    let localResponse: Response | null = null;
     try {
-        const localResponse = await request('', path, options);
+        localResponse = await request('', path, options);
         if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
-        // GitHub Pages/static hosting may return 404/405 (or another non-2xx)
-        // for /api routes. In that case, use the Supabase Edge Function.
-        // Preserve a real login 401 so bad passwords are handled locally.
+        // GitHub Pages is a static host, so /api/* may return 404/405. In either
+        // case continue to the Supabase cloud API. Keep a real 401 from login so
+        // a wrong password is not hidden by the cloud fallback.
         if (localResponse.status === 401 && path === '/api/auth/login') return localResponse;
     } catch {}
     if (!CLOUD_API_BASE) throw new Error('Authentication server unavailable');
