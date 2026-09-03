@@ -14,6 +14,7 @@ let pool = null;
 let initPromise = null;
 let syncTimer = null;
 let syncing = false;
+let initialSnapshotQueued = false;
 
 function getPool() {
   if (pool) return pool;
@@ -48,14 +49,14 @@ async function initDb() {
       next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (collection_name, document_id)
     )`);
-    // On the first cloud-enabled startup, queue the complete current local snapshot.
-    if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN) {
+    if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN && !initialSnapshotQueued) {
       await db.query(`INSERT INTO cloud_sync_queue (collection_name, document_id, data, queued_at, attempts, next_attempt_at)
         SELECT collection_name, document_id, data, NOW(), 0, NOW()
         FROM app_storage
         WHERE collection_name=$1
         ON CONFLICT (collection_name, document_id) DO UPDATE SET
           data=EXCLUDED.data, queued_at=NOW(), attempts=0, next_attempt_at=NOW()`, [DEFAULT_COLLECTION]);
+      initialSnapshotQueued = true;
     }
     return db;
   })().catch((error) => { initPromise = null; throw error; });
