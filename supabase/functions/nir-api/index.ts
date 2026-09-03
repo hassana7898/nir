@@ -44,19 +44,10 @@ function bytesToB64(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function b64ToBytes(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4);
-  const binary = atob(normalized);
-  return Uint8Array.from(binary, c => c.charCodeAt(0));
-}
+function bytesToHex(bytes: Uint8Array) { return [...bytes].map(b => b.toString(16).padStart(2, "0")).join(""); }
 
 async function sha256(text: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return bytesToHex(new Uint8Array(digest));
-}
-
-function bytesToHex(bytes: Uint8Array) {
-  return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))));
 }
 
 async function hmacHex(keyText: string, payload: string) {
@@ -117,9 +108,10 @@ async function setupPassword(req: Request) {
   if (existing.hash && existing.salt) return response(req, { ok: false, error: "Password is already configured" }, 409);
   const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
   const hash = await sha256(password + salt);
+  const now = new Date().toISOString();
   const rows = [
-    { collection_name: COLLECTION, document_id: "poultryAppPasswordSalt", data: { value: salt }, updated_at: new Date().toISOString() },
-    { collection_name: COLLECTION, document_id: "poultryAppPasswordHash", data: { value: hash }, updated_at: new Date().toISOString() },
+    { collection_name: COLLECTION, document_id: "poultryAppPasswordSalt", data: { value: salt }, updated_at: now },
+    { collection_name: COLLECTION, document_id: "poultryAppPasswordHash", data: { value: hash }, updated_at: now },
   ];
   const { error } = await supabase.from("app_storage").upsert(rows, { onConflict: "collection_name,document_id" });
   if (error) return response(req, { ok: false, error: error.message }, 500);
@@ -156,7 +148,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   try {
     const url = new URL(req.url);
-    const parts = url.pathname.split("/").filter(Boolean).slice(1);
+    const marker = "/nir-api";
+    const markerIndex = url.pathname.indexOf(marker);
+    const relativePath = markerIndex >= 0 ? url.pathname.slice(markerIndex + marker.length) : url.pathname;
+    const parts = relativePath.split("/").filter(Boolean);
     if (parts[0] === "api" && parts[1] === "health") return response(req, { status: "ok", database: "supabase" });
     if (parts[0] === "api" && parts[1] === "auth") {
       const action = parts[2];
