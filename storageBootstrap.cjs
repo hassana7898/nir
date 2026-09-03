@@ -165,6 +165,19 @@ async function processCloudQueue() {
   finally { syncing = false; }
 }
 
+async function synchronizeCloudAndLocal() {
+  if (!CLOUD_SYNC_URL || !CLOUD_SYNC_TOKEN || !DATABASE_URL || syncing) return;
+  try {
+    const db = await initDb();
+    // Pull first so web-created records reach PostgreSQL while the factory PC is on.
+    await pullCloudSnapshot(db);
+    // Then push any local-newer records back to the cloud.
+    await processCloudQueue();
+  } catch (error) {
+    console.error('[Bidirectional sync] failed:', error?.message || error);
+  }
+}
+
 function installStorageApi(app) {
   if (app.__postgresStorageInstalled) return;
   app.__postgresStorageInstalled = true;
@@ -191,6 +204,9 @@ function installStorageApi(app) {
 function patchedExpress(...args){const app=originalExpress(...args);installStorageApi(app);return app;}
 Object.setPrototypeOf(patchedExpress,originalExpress);Object.assign(patchedExpress,originalExpress);
 Module._load=function(request,parent,isMain){if(request==='express')return patchedExpress;return originalLoad.apply(this,arguments);};
-if(CLOUD_SYNC_URL&&CLOUD_SYNC_TOKEN){syncTimer=setInterval(()=>void processCloudQueue(),10000);if(syncTimer.unref)syncTimer.unref();}
+if(CLOUD_SYNC_URL&&CLOUD_SYNC_TOKEN){
+  syncTimer=setInterval(()=>void synchronizeCloudAndLocal(),10000);
+  if(syncTimer.unref)syncTimer.unref();
+}
 async function shutdown(){if(syncTimer)clearInterval(syncTimer);if(pool)await pool.end().catch(()=>{});}
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
