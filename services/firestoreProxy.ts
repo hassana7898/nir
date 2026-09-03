@@ -34,8 +34,6 @@ const request = async (url: string, options?: RequestInit, credentials: RequestC
 
 const cloudRequest = async (path: string, options?: RequestInit) => {
   if (!CLOUD_API_BASE) throw new Error('Cloud storage URL is not configured');
-  // The Supabase Edge Function is mounted at /nir-api, while its application
-  // routes live under /api/... . Local and cloud paths therefore differ here.
   return request(`${CLOUD_API_BASE}/api/storage${path}`, options, 'include');
 };
 
@@ -45,6 +43,8 @@ const withCloudFallback = async (path: string, options?: RequestInit) => {
   } catch (localError) {
     if (!CLOUD_API_BASE) throw localError;
     console.warn('Local server unavailable; using cloud replica.', localError);
+    // A browser without the local NIR server must never attempt a cloud PUT
+    // through this fallback. Cloud writes are handled explicitly by setDoc.
     return cloudRequest(path, { ...options, method: options?.method === 'PUT' ? 'GET' : options?.method });
   }
 };
@@ -54,10 +54,22 @@ export const doc = (_db: any, collectionName: string, id: string): DocRef => ({ 
 export const collection = (_db: any, collectionName: string): CollectionRef => ({ __type: 'collection', collection: collectionName });
 
 export const setDoc = async (ref: DocRef, data: any, _options?: any): Promise<void> => {
-  // Local PostgreSQL remains the single writable master. The cloud side is a replica.
-  await request(`${API_BASE}/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`, {
-    method: 'PUT', body: JSON.stringify(data),
-  });
+  const path = `/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`;
+
+  // The factory PC writes to PostgreSQL. A static/cloud-only browser writes
+  // directly to Supabase. This makes the same dataService API work in both modes.
+  try {
+    await request(`${API_BASE}${path}`, {
+      method: 'PUT', body: JSON.stringify(data),
+    }, 'same-origin');
+    return;
+  } catch (localError) {
+    if (!CLOUD_API_BASE) throw localError;
+    console.warn('Local server unavailable; writing directly to cloud replica.', localError);
+    await cloudRequest(path, {
+      method: 'PUT', body: JSON.stringify(data),
+    });
+  }
 };
 
 export const getDoc = async (ref: DocRef): Promise<SnapshotDoc> => {
