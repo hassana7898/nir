@@ -19,8 +19,9 @@ const api = async (path: string, options: RequestInit = {}): Promise<Response> =
     try {
         const localResponse = await request('', path, options);
         if (localResponse.ok || !CLOUD_API_BASE) return localResponse;
-        // A static host has no /api routes and normally returns 404; use the cloud API.
-        if (localResponse.status !== 404 && localResponse.status < 500 && localResponse.status !== 401) return localResponse;
+        // GitHub Pages/static hosting may return 404/405 (or another non-2xx)
+        // for /api routes. In that case, use the Supabase Edge Function.
+        // Preserve a real login 401 so bad passwords are handled locally.
         if (localResponse.status === 401 && path === '/api/auth/login') return localResponse;
     } catch {}
     if (!CLOUD_API_BASE) throw new Error('Authentication server unavailable');
