@@ -56,23 +56,23 @@ async function initDb() {
 function validCollection(name) { return name === DEFAULT_COLLECTION; }
 
 async function mirrorToCloud(id, data) {
-  if (!CLOUD_SYNC_URL) return false;
+  if (!CLOUD_SYNC_URL || !CLOUD_SYNC_TOKEN) return false;
   try {
-    const headers = { 'Content-Type': 'application/json' };
-    if (CLOUD_SYNC_TOKEN) headers.Authorization = `Bearer ${CLOUD_SYNC_TOKEN}`;
     const response = await fetch(`${CLOUD_SYNC_URL}/api/storage/${encodeURIComponent(DEFAULT_COLLECTION)}/${encodeURIComponent(id)}`, {
-      method: 'PUT', headers, body: JSON.stringify(data),
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-NIR-Sync-Token': CLOUD_SYNC_TOKEN },
+      body: JSON.stringify(data),
     });
     if (!response.ok) throw new Error(`Cloud mirror failed (${response.status}) ${await response.text().catch(() => '')}`);
     return true;
   } catch (error) {
-    console.error('[Cloudflare mirror] sync failed:', error?.message || error);
+    console.error('[Cloud replica] sync failed:', error?.message || error);
     return false;
   }
 }
 
 async function processCloudQueue() {
-  if (syncing || !CLOUD_SYNC_URL || !DATABASE_URL) return;
+  if (syncing || !CLOUD_SYNC_URL || !CLOUD_SYNC_TOKEN || !DATABASE_URL) return;
   syncing = true;
   try {
     const db = await initDb();
@@ -88,7 +88,7 @@ async function processCloudQueue() {
           WHERE collection_name=$1 AND document_id=$2`, [row.collection_name, row.document_id]);
       }
     }
-  } catch (error) { console.error('[Cloudflare queue] failed:', error?.message || error); }
+  } catch (error) { console.error('[Cloud replica queue] failed:', error?.message || error); }
   finally { syncing = false; }
 }
 
@@ -107,7 +107,7 @@ function installStorageApi(app) {
     try {
       const db = await initDb(); await db.query('SELECT 1');
       const pending = await db.query('SELECT COUNT(*)::int AS count FROM cloud_sync_queue');
-      res.json({ status: 'ok', configured: true, database: 'postgresql', collection: DEFAULT_COLLECTION, cloudReplicaConfigured: Boolean(CLOUD_SYNC_URL), pendingCloudSync: pending.rows[0].count });
+      res.json({ status: 'ok', configured: true, database: 'postgresql', collection: DEFAULT_COLLECTION, cloudReplicaConfigured: Boolean(CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN), pendingCloudSync: pending.rows[0].count });
     } catch (error) {
       console.error('[PostgreSQL] health failed:', error);
       res.status(503).json({ status: 'error', configured: Boolean(DATABASE_URL), database: 'postgresql', error: error.message });
@@ -156,7 +156,7 @@ function patchedExpress(...args) { const app = originalExpress(...args); install
 Object.setPrototypeOf(patchedExpress, originalExpress); Object.assign(patchedExpress, originalExpress);
 Module._load = function(request, parent, isMain) { if (request === 'express') return patchedExpress; return originalLoad.apply(this, arguments); };
 
-if (CLOUD_SYNC_URL) {
+if (CLOUD_SYNC_URL && CLOUD_SYNC_TOKEN) {
   syncTimer = setInterval(() => void processCloudQueue(), 10000);
   if (syncTimer.unref) syncTimer.unref();
 }
