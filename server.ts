@@ -27,6 +27,9 @@ import { corsMiddleware } from "./server/middleware/cors";
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+// Bind host: read from HOST env, default to loopback for production safety.
+// Set HOST=0.0.0.0 explicitly if LAN/public binding is intended.
+const HOST = (process.env.HOST || '127.0.0.1').trim() || '127.0.0.1';
 
 app.use(securityHeaders);
 app.use(corsMiddleware);
@@ -178,7 +181,7 @@ async function startServer() {
   app.use('/assets', (req, res) => res.status(404).send('Asset not found'));
   app.use(errorHandler);
 
-  httpServer = app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://0.0.0.0:${PORT}`));
+  httpServer = app.listen(PORT, HOST, () => console.log(`[NIR] Server running on http://${HOST}:${PORT}`));
 }
 
 const shutdown = async (signal: string) => {
