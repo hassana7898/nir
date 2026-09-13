@@ -1,7 +1,7 @@
 
 import { Settings, Entry, Exit, Log, Remittance, Product, Formula, ProductionRecord, InventoryAdjustment, Farmer, Brood } from '../types';
 import { formatToISODate, formatDate } from '../utils/formatters';
-import { memoryCache, setStoreItem, initDataStore, enqueueSync, triggerSync, getDB } from './dbStore';
+import { memoryCache, setStoreItem, initDataStore, enqueueSync, triggerSync, getDB, hydrateFromServer } from './dbStore';
 
 // Pure UI Preferences Storage (Non-sensitive, UI-only, e.g. sort orders, theme, view options)
 const uiPreferencesStorage = {
@@ -770,16 +770,32 @@ export const logAction = async (action: string, type: string, item: any, oldD?: 
     });
 };
 
-// --- BACKUP AND RESTORE (Server-backed + Offline cache snapshot) ---
+// --- BACKUP AND RESTORE (Server-backed authoritative snapshot) ---
+
+export interface ImportSummary {
+    restoredTables: Record<string, number>;
+    verifiedCounts?: Record<string, number>;
+    skippedTables?: string[];
+    totalRows?: number;
+    /** true when only the local offline cache could be restored (server unreachable). */
+    localOnly?: boolean;
+}
+
+/**
+ * Export a COMPLETE, restorable snapshot of the authoritative server data.
+ * The JSON returned here is exactly what importData() accepts.
+ */
 export const exportData = async (): Promise<string> => {
     try {
-        const res = await fetch('/api/backup', { method: 'POST', credentials: 'include' });
+        const res = await fetch('/api/backup/export', { method: 'GET', credentials: 'include' });
         if (res.ok) {
             const data = await res.json();
-            return JSON.stringify(data, null, 2);
+            if (data && typeof data === 'object' && data.tables) {
+                return JSON.stringify(data, null, 2);
+            }
         }
     } catch (_err) {
-        // Fallback to client cache snapshot if server is unreachable
+        // Fall back to the local cache snapshot when the server is unreachable.
     }
 
     // Fallback: client-side offline cache snapshot
@@ -791,24 +807,59 @@ export const exportData = async (): Promise<string> => {
     return JSON.stringify(snapshot, null, 2);
 };
 
-export const importData = async (jsonData: string): Promise<void> => {
-    const allData = JSON.parse(jsonData);
+/**
+ * Import a backup. Throws a precise, user-facing error when the restore fails -
+ * a failed restore must never be reported as success by the UI.
+ */
+export const importData = async (jsonData: string): Promise<ImportSummary> => {
+    let parsed: any;
     try {
-        await fetch('/api/backup/restore', {
+        parsed = JSON.parse(jsonData);
+    } catch {
+        throw new Error('فایل پشتیبان نامعتبر است (JSON خوانده نشد).');
+    }
+
+    const isServerSnapshot = parsed && typeof parsed === 'object' && parsed.tables && typeof parsed.tables === 'object';
+
+    if (isServerSnapshot) {
+        const res = await fetch('/api/backup/restore', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: jsonData,
         });
-    } catch (_err) {
-        // Continue to restore local IndexedDB store
+        const payload = await res.json().catch(() => ({} as any));
+        if (!res.ok) {
+            throw new Error(payload?.error || `بازیابی ناموفق بود (HTTP ${res.status}).`);
+        }
+
+        invalidateInventoryCache();
+        try { await hydrateFromServer(); } catch { /* local refresh is best-effort */ }
+
+        return {
+            restoredTables: payload.restoredTables || {},
+            verifiedCounts: payload.verifiedCounts,
+            skippedTables: payload.skippedTables,
+            totalRows: payload.totalRows,
+        };
     }
 
+    // Legacy / offline-cache snapshot (key -> value map from an earlier local export).
+    const ignoredKeys = new Set(['success', 'file', 'fileName', 'format', 'sizeBytes', 'downloadUrl', 'error']);
     const db = await getDB();
-    for (const key in allData) {
-        memoryCache[key] = allData[key];
-        await db.put('store', allData[key], key);
+    let restored = 0;
+    for (const key in parsed) {
+        if (ignoredKeys.has(key)) continue;
+        memoryCache[key] = parsed[key];
+        await db.put('store', parsed[key], key);
+        restored++;
     }
+    if (restored === 0) {
+        throw new Error('فایل پشتیبان شامل داده‌ی قابل بازیابی نبود.');
+    }
+    invalidateInventoryCache();
+    try { await hydrateFromServer(); } catch { /* local refresh is best-effort */ }
+    return { restoredTables: { local: restored }, localOnly: true };
 };
 
 export const migrateLegacyData = async () => {

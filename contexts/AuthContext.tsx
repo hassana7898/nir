@@ -5,7 +5,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isPasswordSet: boolean;
   loading: boolean;
-  login: (password: string) => Promise<boolean>;
+  login: (password: string) => Promise<authService.LoginResult>;
   logout: () => Promise<void>;
   setupPassword: (password: string) => Promise<void>;
 }
@@ -26,11 +26,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => { void checkStatus(); }, [checkStatus]);
 
-  const login = async (password: string) => {
-    const ok = await authService.verifyPassword(password);
-    setIsAuthenticated(ok);
-    if (ok) setIsPasswordSet(true);
-    return ok;
+  const login = async (password: string): Promise<authService.LoginResult> => {
+    const result = await authService.verifyPassword(password);
+    // Only a real success flips auth state; a successful server login is never
+    // downgraded to a failure by the transport/cache layers.
+    if (result.ok) {
+      setIsAuthenticated(true);
+      setIsPasswordSet(true);
+    }
+    return result;
   };
 
   const logout = async () => { await authService.logout(); setIsAuthenticated(false); };

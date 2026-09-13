@@ -2,6 +2,7 @@
 import React, { useState, FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { showToast } from '../utils/helpers';
+import { isLoginFailure, loginErrorMessage } from '../services/authService';
 
 const LoginPage: React.FC = () => {
     const [password, setPassword] = useState('');
@@ -13,18 +14,28 @@ const LoginPage: React.FC = () => {
         e.preventDefault();
         setError('');
         setLoading(true);
-        const success = await login(password);
-        if (!success) {
-            setError('رمز عبور اشتباه است');
-            showToast('رمز عبور اشتباه است', 'error');
+
+        const result = await login(password);
+
+        if (isLoginFailure(result)) {
+            // Only INVALID_CREDENTIALS is a wrong password; every other failure has
+            // its own message (rate limited / server error / network / timeout).
+            const message = loginErrorMessage(result);
+            setError(message);
+            showToast(message, 'error');
             setLoading(false);
+            return;
         }
+
+        // Success: AuthContext flips `isAuthenticated` and the app renders the
+        // dashboard immediately - no page refresh is required. While that happens
+        // we keep the button in its loading state.
     };
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-slate-100">
             <div className="p-8 bg-white rounded-xl shadow-md w-full max-w-sm">
-                <h1 className="text-2xl font-bold text-center text-slate-700 mb-6">ورود به سامانه</h1>
+                <h1 className="text-2xl font-bold text-center text-slate-700 mb-6">ورود به سیستم</h1>
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
                         <label htmlFor="password" className="block text-sm font-medium text-slate-600 mb-1">رمز عبور</label>
@@ -44,7 +55,7 @@ const LoginPage: React.FC = () => {
                         disabled={loading}
                         className="w-full bg-sky-500 text-white p-3 rounded-lg hover:bg-sky-600 transition-colors disabled:bg-sky-300"
                     >
-                        {loading ? 'در حال بررسی...' : 'ورود'}
+                        {loading ? 'در حال ورود...' : 'ورود'}
                     </button>
                 </form>
             </div>

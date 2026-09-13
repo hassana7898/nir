@@ -355,27 +355,32 @@ const SettingsPage: React.FC = () => {
                 const jsonData = event.target?.result as string;
                 Swal.fire({
                     title: 'آیا مطمئن هستید؟',
-                    html: `این عملیات تمام اطلاعات فعلی شما را <strong class="text-red-500">حذف</strong> و با اطلاعات فایل پشتیبان جایگزین می‌کند. این عمل غیرقابل بازگشت است.`,
+                    html: `اطلاعات فایل پشتیبان روی داده‌های فعلی <strong>بازنویسی/ادغام</strong> می‌شود: رکوردهای هم‌شناسه به‌روزرسانی و رکوردهای جدید اضافه می‌شوند. هیچ داده‌ای حذف نمی‌شود.`,
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonColor: '#d33',
                     cancelButtonColor: '#3085d6',
-                    confirmButtonText: 'بله، جایگزین کن!',
+                    confirmButtonText: 'بله، بازیابی کن!',
                     cancelButtonText: 'انصراف'
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        dataService.importData(jsonData);
-                        Swal.fire({
-                            title: 'موفق',
-                            text: 'اطلاعات با موفقیت بازیابی شد. برنامه مجددا بارگذاری می‌شود...',
+                }).then(async (result) => {
+                    if (!result.isConfirmed) return;
+                    try {
+                        const summary = await dataService.importData(jsonData);
+                        const detail = Object.entries(summary.restoredTables || {})
+                            .filter(([, count]) => count > 0)
+                            .map(([table, count]) => `${table}: ${count}`)
+                            .join(' | ');
+                        await Swal.fire({
+                            title: 'بازیابی انجام شد',
+                            html: detail
+                                ? `رکوردهای بازنویسی‌شده - ${detail}`
+                                : 'فایل پشتیبان شامل داده‌ی قابل بازیابی نبود.',
                             icon: 'success',
-                            timer: 2000,
-                            timerProgressBar: true,
-                            showConfirmButton: false,
-                        }).then(() => {
-                            // After import, reload to apply all new data
-                            window.location.reload();
                         });
+                        // Refresh local cache from the authoritative server state.
+                        window.location.reload();
+                    } catch (err) {
+                        Swal.fire('خطا', (err as Error)?.message || 'بازیابی ناموفق بود.', 'error');
                     }
                 });
             } catch (error) {
@@ -574,9 +579,9 @@ const SettingsPage: React.FC = () => {
             return;
         }
 
-        const isVerified = await authService.verifyPassword(currentPassword);
-        if (!isVerified) {
-            showToast('رمز عبور فعلی اشتباه است.', 'error');
+        const verifyResult = await authService.verifyPassword(currentPassword);
+        if (authService.isLoginFailure(verifyResult)) {
+            showToast(authService.loginErrorMessage(verifyResult), 'error');
             return;
         }
 

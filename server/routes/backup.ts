@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { backupDatabase, restoreDatabase } from '../services/backup';
+import { backupDatabase, exportSnapshot, restoreDatabase } from '../services/backup';
 import { requireRole } from '../middleware/auth';
 
 const router = express.Router();
@@ -21,6 +21,17 @@ router.post('/', requireRole('ADMIN'), async (_req, res) => {
   } catch (error: any) {
     console.error('Backup error:', error);
     res.status(500).json({ error: error.message || 'Backup failed.' });
+  }
+});
+
+// GET /api/backup/export - Complete, self-contained JSON snapshot (used by Settings -> Export)
+router.get('/export', requireRole('ADMIN'), async (_req, res) => {
+  try {
+    const snapshot = await exportSnapshot();
+    res.json(snapshot);
+  } catch (error: any) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: error.message || 'Export failed.' });
   }
 });
 
@@ -46,7 +57,13 @@ router.post('/restore', requireRole('ADMIN'), async (req, res) => {
     }
 
     const result = await restoreDatabase(backupData);
-    res.json({ success: true, restoredTables: result.restoredTables });
+    res.json({
+      success: true,
+      restoredTables: result.restoredTables,
+      verifiedCounts: result.verifiedCounts,
+      skippedTables: result.skippedTables,
+      totalRows: result.totalRows,
+    });
   } catch (error: any) {
     console.error('Restore error:', error);
     res.status(500).json({ error: error.message || 'Restore failed.' });

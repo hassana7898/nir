@@ -31,6 +31,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Set HOST=0.0.0.0 explicitly if LAN/public binding is intended.
 const HOST = (process.env.HOST || '127.0.0.1').trim() || '127.0.0.1';
 
+// Nginx runs on this host and forwards the real client IP. Trusting only the
+// loopback proxy makes req.ip (used by the auth rate limiter) the actual client
+// instead of 127.0.0.1 - otherwise every user shares a single 30 req/5min bucket.
+app.set('trust proxy', 'loopback');
+
 app.use(securityHeaders);
 app.use(corsMiddleware);
 app.use(express.json({ limit: "50mb" }));

@@ -13,6 +13,21 @@ export function setupPWA() {
     return;
   }
 
+  // Migration: this origin previously served a different (Firebase) application, so a
+  // legacy service worker may still be registered at another path and intercept
+  // navigations or requests. Remove anything that is not our own /sw.js.
+  const expectedScriptUrl = new URL('/sw.js', window.location.origin).href;
+  navigator.serviceWorker.getRegistrations()
+    .then((registrations) => Promise.all(registrations.map((registration) => {
+      const worker = registration.active || registration.waiting || registration.installing;
+      if (worker && worker.scriptURL !== expectedScriptUrl) {
+        console.warn('[NIR PWA] Removing stale service worker from a previous app:', worker.scriptURL);
+        return registration.unregister();
+      }
+      return Promise.resolve(false);
+    })))
+    .catch(() => { /* service worker API unavailable - app still works without it */ });
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then((registration) => {
